@@ -56,7 +56,7 @@ For matrix completion, the chosen kernel is:
 
 $$
 h(V) = \frac{1}{4}\|V\|_F^4 + \frac{\tau}{3}\|V\|_F^2
-\quad V = \begin{pmatrix} W \ H \end{pmatrix}
+\quad V = \begin{pmatrix} W \\ H \end{pmatrix}
 $$
 
 This kernel leads to **closed-form updates** and **adaptive step-size selection** through a backtracking line search, ensuring convergence under relative smoothness conditions.
