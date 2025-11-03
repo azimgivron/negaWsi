@@ -46,7 +46,7 @@ $$
 The NEGA update rule is defined as:
 
 $$
-x^{k+1} = \arg\min_x \left\{ \langle \nabla f(x^k), x - x^k \rangle + \frac{1}{\alpha} \mathcal{D}_h(x, x^k) \right\}
+x^{k+1} = \arg\min_x \Big\{ \langle \nabla f(x^k), x - x^k \rangle + \frac{1}{\alpha} \mathcal{D}_h(x, x^k) \Big\}
 $$
 
 where $\alpha > 0$ is the step size.
