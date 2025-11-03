@@ -392,7 +392,7 @@ class NegaBase(metaclass=abc.ABCMeta):
         loss = self.calculate_loss()
         return W_k_next, loss
 
-    def run(self, log_freq: int = 10) -> MatrixCompletionResult:
+    def run(self, log_freq: int = 10) -> Result:
         """
         Performs matrix completion using adaptive step size optimization.
 
@@ -433,7 +433,7 @@ class NegaBase(metaclass=abc.ABCMeta):
                 Default to 10 (iterations).
 
         Returns:
-            MatrixCompletionResult: A dataclass containing:
+            Result: A dataclass containing:
                 - completed_matrix: The reconstructed matrix (low-rank approximation).
                 - loss_history: List of loss values at each iteration.
                 - rmse_history: List of RMSE values at each iteration.
