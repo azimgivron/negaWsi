@@ -556,7 +556,7 @@ class NegaBase(metaclass=abc.ABCMeta):
                 self.set_weights(self.early_stopping.best_weights)
                 self.logger.debug("[Early Stopping] Training interrupted.")
                 if ith_iteration % log_freq != 0 and self.writer is not None:
-                    self.tb_log(ith_iteration, testing_loss, grad_f_W_k)
+                    self.callback(ith_iteration, testing_loss, grad_f_W_k)
                 break
         # Compute runtime
         runtime = time.time() - start_time
