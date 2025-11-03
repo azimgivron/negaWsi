@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "negaWsi"
+readme = "README.md"
+description = "Non-Euclidean Gradient Algorithm for matrix completion With Side Information (negaWsi)"
+classifiers = ["Programming Language :: Python :: 3.11"]
+requires-python = ">=3.11"
+dynamic = ["version", "dependencies"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = "requirements.txt" }
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
