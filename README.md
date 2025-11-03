@@ -7,21 +7,25 @@ The method is applied to **gene–disease association matrix completion** for **
 
 In gene prioritization, we aim to infer missing associations between genes and diseases represented by a sparse matrix
 $R \in \mathbb{R}^{n \times m}$, where $n$ is the number of genes and $m$ is the number of diseases.
-The algorithm completes this matrix by learning two low-rank latent representations:
+The algorithm completes this matrix by learning two low-rank latent representations: 
+
 $$
 R \approx W H^\top, \quad
 W \in \mathbb{R}^{n \times k}, \; H \in \mathbb{R}^{m \times k}
 $$
+
 where $k \ll \min(n, m)$ is the latent dimension.
 The goal is to assign high scores to plausible but unobserved gene–disease pairs.
 
 ## 2. Objective Function
 
 The core optimization problem is:
+
 $$
 \min_{W,H}
 \frac{1}{2} \|B \odot (R - WH^\top)\|_F^2 +\lambda_g \|W\|_F^2 + \lambda_d \|H\|_F^2
 $$
+
 where:
 - $B$ is a binary mask for observed entries,
 - $\lambda_g, \lambda_d$ are regularization coefficients,
@@ -34,18 +38,22 @@ This formulation captures reconstruction error and applies Frobenius regularizat
 NEGA generalizes gradient descent by using **Bregman distances** instead of the Euclidean norm, allowing updates that respect the **geometry of the problem**.
 
 Given a differentiable, strictly convex kernel function $h$, the **Bregman distance** between $x$ and $y$ is:
+
 $$
 \mathcal{D}_h(x, y) = h(x) - h(y) - \langle \nabla h(y), x - y \rangle
 $$
 
 The NEGA update rule is defined as:
+
 $$
 x^{k+1} = \arg\min_x \left\{ \langle \nabla f(x^k), x - x^k \rangle + \frac{1}{\alpha} \mathcal{D}_h(x, x^k) \right\}
 $$
+
 where $\alpha > 0$ is the step size.
 
 When $h(x) = \tfrac{1}{2}\|x\|_2^2$, this reduces to standard gradient descent.
 For matrix completion, the chosen kernel is:
+
 $$
 h(V) = \frac{1}{4}\|V\|_F^4 + \frac{\tau}{3}\|V\|_F^2
 \quad V = \begin{pmatrix} W \ H \end{pmatrix}
@@ -79,16 +87,18 @@ where:
 * $W \in \mathbb{R}^{g \times k}$, $H \in \mathbb{R}^{d \times k}$.
 
 The corresponding objective is:
+
 $$
 \min_{W,H}
 \frac{1}{2}\|B \odot (R - XWH^\top Y^\top)\|_F^2
 + \lambda_g\|W\|_F^2
 + \lambda_d\|H\|_F^2
-  $$
+$$
 
 ### 5.2. SI via Regularized Latent Alignment
 
 Following the GeneHound model, side information is linked to the latent variables through regularization:
+
 $$
 \begin{aligned}
 \min_{W,H,\beta_g,\beta_d} \;
@@ -99,6 +109,7 @@ $$
 + \frac{\lambda_{\beta_d}}{2}\|P_H H - Y\beta_d\|_F^2
 \end{aligned}
 $$
+
 where $P_W, P_H$ are centering matrices enforcing mean-zero latent representations.
 
 This formulation assumes Gaussian priors on parameters and residuals, while preserving the convergence guarantees of NEGA.
