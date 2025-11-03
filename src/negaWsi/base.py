@@ -490,10 +490,8 @@ class NegaBase(metaclass=abc.ABCMeta):
                 res_norm_next_it
                 <= res_norm + linear_approx + self.smoothness_parameter * bregman
             )
-            if self.writer is not None and (
-                (ith_iteration + 1) % log_freq == 0 or ith_iteration == 0
-            ):
-                self.tb_log(ith_iteration, testing_loss, grad_f_W_k)
+            if (ith_iteration + 1) % log_freq == 0 or ith_iteration == 0:
+                self.callback(ith_iteration, testing_loss, grad_f_W_k)
             while not non_euclidean_descent_lemma_cond:
                 flag = 1
                 inner_loop_it += 1
