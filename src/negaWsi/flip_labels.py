@@ -6,10 +6,6 @@ Flip Labels Module
 Provides functionality to simulate label noise by flipping positive labels to negative labels
 in matrix-based datasets. The API is designed to be straightforward and intuitive, allowing
 users to apply noise on training masks at configurable intervals.
-
-Features:
-- Probabilistic label flipping for noise simulation.
-- Resampling based on a configurable flipping frequency.
 """
 import numpy as np
 

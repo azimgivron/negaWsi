@@ -309,7 +309,7 @@ class NegaBase(metaclass=abc.ABCMeta):
         """
         actual_values = self.matrix[mask]
         predictions = self.predict_all()[mask]
-        rmse = np.sqrt((actual_values - predictions) ** 2).mean()
+        rmse = np.sqrt(((actual_values - predictions) ** 2).mean())
         return rmse
 
     def callback(
