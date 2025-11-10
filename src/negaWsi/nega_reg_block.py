@@ -1,20 +1,20 @@
 # pylint: disable=C0103,R0914,R0801
 """
-NEGA with Side Information as Regularization (NEGA-Reg).
-=========================================================
+NEGA with Side Information as Regularization (NEGA-Reg-Block).
+=============================================================
 
-This module implements Non-Euclidean Gradient Algorithm
-with Side Information as Regularization.
+This module implements a two-phase (block-coordinate) optimization for
+matrix completion under the NEGA framework with side information.
 """
 from typing import Tuple
 
 import numpy as np
 
-from negaWsi.base import NegaBase
+from negaWsi.nega_reg import NegaReg
 from negaWsi.utils import svd
 
 
-class NegaReg(NegaBase):
+class NegaRegBlock(NegaReg):
     """
     Matrix completion with side information following the formulation
     from GeneHound.
@@ -31,6 +31,10 @@ class NegaReg(NegaBase):
         where:
             P_n = I_n - (1/n) * 1_n @ 1_n.T
             P_m = I_m - (1/m) * 1_m @ 1_m.T
+
+        Optimization is performed in two alternating phases:
+            Phase A (Latents): update h1, h2 with NEGA/gradient steps given current β_G, β_D.
+            Phase B (Links): update β_G, β_D in closed form (ridge) given current h1, h2.
 
     Attributes:
         gene_side_info (np.ndarray): Side information for genes (G ∈ R^{n x g}).
@@ -96,10 +100,12 @@ class NegaReg(NegaBase):
 
             method = "with random weights"
 
+        self.i = 0
         nb_gene_features = gene_side_info.shape[1]
         nb_disease_features = disease_side_info.shape[1]
-        self.beta_g = np.random.randn(nb_gene_features, self.rank)
-        self.beta_d = np.random.randn(nb_disease_features, self.rank)
+        self.beta_g = np.empty((nb_gene_features, self.rank))
+        self.beta_d = np.empty((nb_disease_features, self.rank))
+        self.compute_betas()
 
         self.logger.debug(
             "Initialized h1 with shape %s and h2 with shape %s %s with side information",
@@ -124,7 +130,7 @@ class NegaReg(NegaBase):
         Returns:
             np.ndarray: The weight block matrix.
         """
-        return np.vstack([self.h1, self.h2.T, self.beta_g, self.beta_d])
+        return np.vstack([self.h1, self.h2.T])
 
     def set_weights(self, weight_matrix: np.ndarray):
         """
@@ -133,49 +139,21 @@ class NegaReg(NegaBase):
         Args:
             weight_matrix (np.ndarray): The stacked block matrix.
         """
-        nb_genes, nb_diseases = self.matrix.shape
-        gene_feat_dim = self.beta_g.shape[0]
-        self.h1 = weight_matrix[0:nb_genes, :]
-        self.h2 = weight_matrix[nb_genes : nb_genes + nb_diseases, :].T
-        self.beta_g = weight_matrix[
-            nb_genes + nb_diseases : nb_genes + nb_diseases + gene_feat_dim, :
-        ]
-        self.beta_d = weight_matrix[(nb_genes + nb_diseases + gene_feat_dim) :, :]
-
-    def kernel(self, W: np.ndarray, tau: float) -> float:
-        """
-        Compute the kernel function h(W) = 0.25 * ||W||_F^4 + 0.5 * tau * ||W||_F^2.
-
-        Args:
-            W (np.ndarray): Latent parameter matrix.
-            tau (float): Regularization parameter.
-
-        Returns:
-            float: Kernel value.
-        """
-        norm = np.linalg.norm(W, ord="fro")
-        return 0.25 * norm**4 + 0.5 * tau * norm**2
-
-    def predict_all(self) -> np.ndarray:
-        """
-        Compute the full matrix reconstruction R_hat = h1 @ h2.
-
-        Returns:
-            np.ndarray: Reconstructed matrix of shape (n, m).
-        """
-        return self.h1 @ self.h2
+        nb_genes, _ = self.matrix.shape
+        self.h1 = weight_matrix[:nb_genes, :]
+        self.h2 = weight_matrix[nb_genes:, :].T
 
     def compute_grad_f_W_k(self) -> np.ndarray:
         """
-        Compute the stacked gradient of the objective function w.r.t. all variables:
+        Phase A (Latents):
+            Compute the stacked gradient of the objective
+            function w.r.t. (h1, h2) holding (β_G, β_D) fixed.:
 
-        grad_f_W_k = (∇_h1, ∇_h2.T, ∇_beta_g, ∇_beta_d).T
+        grad_f_W_k = (∇_h1, ∇_h2.T).T
 
         with:
             * ∇_h1 = R @ h2.T + λg * P_n @ (P_n @ h1 - G @ β_G)
             * ∇_h2 = h1.T @ R + λd * (h2 @ P_m - β_D.T @ D.T) @ P_m
-            * ∇_beta_g = -λg * G.T @ (P_n @ h1 - G @ β_G) + λ_βg * β_G
-            * ∇_beta_d = -λd * D.T @ (h2 @ P_m - β_D.T @ D.T).T + λ_βd * β_D
 
         where
             R = B ⊙ (h1 @ h2 - M)
@@ -183,7 +161,7 @@ class NegaReg(NegaBase):
             P_m = I_m - (1/m) * 1_m @ 1_m.T
 
         Returns:
-            np.ndarray: The gradient of the latents ((m+n+g+d) x rank)
+            np.ndarray: The gradient of the latents ((m+n) x rank)
         """
         residuals = (
             self.calculate_training_residual()
@@ -198,6 +176,8 @@ class NegaReg(NegaBase):
         disease_centering = (
             np.eye(nb_diseases) - np.ones((nb_diseases, nb_diseases)) / nb_diseases
         )
+
+        self.compute_betas()
 
         gene_prediction = self.gene_side_info @ self.beta_g  # G @ β_G (nb_genes, k)
         h1_residual_centered = (
@@ -214,42 +194,66 @@ class NegaReg(NegaBase):
         h2_residual_centered = (
             self.h2 @ disease_centering - disease_prediction
         )  # h2 @ P_m - β_D.T @ D.T (k, nb_diseases)
-
         self.loss_terms["|| h2 @ P_m - β_D.T @ D.T ||_F"] = np.linalg.norm(
             h2_residual_centered, ord="fro"
         )
         self.loss_terms["|| β_D ||_F"] = np.linalg.norm(self.beta_d, ord="fro")
 
         grad_h1 = (
-            -residuals @ self.h2.T
+            residuals @ self.h2.T
             + self.regularization_parameters["λg"]
             * gene_centering
             @ h1_residual_centered
         )
         grad_h2 = (
-            -self.h1.T @ residuals
+            self.h1.T @ residuals
             + self.regularization_parameters["λd"]
             * h2_residual_centered
             @ disease_centering
-        )
-        grad_beta_g = (
-            -self.regularization_parameters["λg"]
-            * self.gene_side_info.T
-            @ h1_residual_centered
-            + self.regularization_parameters["λ_βg"] * self.beta_g
-        )
-        grad_beta_d = (
-            -self.regularization_parameters["λd"]
-            * self.disease_side_info.T
-            @ h2_residual_centered.T
-            + self.regularization_parameters["λ_βd"] * self.beta_d
         )
         grad_Wk_next = np.vstack(
             [
                 grad_h1,
                 grad_h2.T,
-                grad_beta_g,
-                grad_beta_d,
             ]
         )
         return grad_Wk_next
+
+    def compute_betas(self):
+        """
+        Phase B (Links): closed-form ridge updates for (β_G, β_D) given (h1, h2).
+
+        Closed-form ridge regression solutions:
+            β_G = (G.T @ G + (λ_βg/λg) * I)^(-1) @ G.T @ P_n @ H1
+            β_D = (D.T @ D + (λ_βd/λd) * I)^(-1) @ D.T @ P_m @ H2.T
+
+        where:
+            P_n = I_n - (1/n) * 1_n @ 1_n.T
+            P_m = I_m - (1/m) * 1_m @ 1_m.T
+        """
+        if self.i % 10 == 0:
+            num_genes, num_diseases = self.matrix.shape
+            P_genes = np.eye(num_genes) - np.ones((num_genes, num_genes)) / num_genes
+            P_diseases = (
+                np.eye(num_diseases)
+                - np.ones((num_diseases, num_diseases)) / num_diseases
+            )
+            ridge_G = (
+                self.gene_side_info.T @ self.gene_side_info
+                + self.regularization_parameters["λ_βg"]
+                / self.regularization_parameters["λg"]
+                * np.eye(self.gene_side_info.shape[1])
+            )
+            ridge_D = (
+                self.disease_side_info.T @ self.disease_side_info
+                + self.regularization_parameters["λ_βd"]
+                / self.regularization_parameters["λd"]
+                * np.eye(self.disease_side_info.shape[1])
+            )
+            self.beta_g = np.linalg.solve(
+                ridge_G, self.gene_side_info.T @ P_genes @ self.h1
+            )
+            self.beta_d = np.linalg.solve(
+                ridge_D, self.disease_side_info.T @ P_diseases @ self.h2.T
+            )
+        self.i += 1

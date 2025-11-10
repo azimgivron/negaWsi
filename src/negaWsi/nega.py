@@ -18,9 +18,9 @@ class Nega(NegaBase):
     This model solves the following optimization problem:
 
         Minimize:
-            0.5 * || B ⊙ (h1 @ h2 - R) ||_F^2
-            + 0.5 * λ * || h1 ||_F^2
-            + 0.5 * λ * || h2 ||_F^2
+            0.5 * || B ⊙ (h1 @ h2 - M) ||_F^2
+            + 0.5 * λg * || h1 ||_F^2
+            + 0.5 * λd * || h2 ||_F^2
 
     Attributes:
         h1 (np.ndarray): Latent factor matrix for genes (n x k).
@@ -128,15 +128,21 @@ class Nega(NegaBase):
         grad_f_W_k = (∇_h1, ∇_h2.T).T
 
         where:
-        - ∇_h1 = R @ h2.T + λ * h1,
-        - ∇_h2 = h1.T @ R + λ * h2
+        - ∇_h1 = R @ h2.T + λg * h1,
+        - ∇_h2 = h1.T @ R + λd * h2
 
         with R = (B ⊙ (h1 @ h2 - M))
 
         Returns:
             np.ndarray: The gradient of the latents ((n+m) x rank)
         """
-        residual = self.calculate_training_residual()
-        grad_h1 = residual @ self.h2.T + self.regularization_parameter * self.h1
-        grad_h2 = self.h1.T @ residual + self.regularization_parameter * self.h2
+        residuals = self.calculate_training_residual()
+        self.loss_terms["|| B ⊙ (h1 @ h2 - M) ||_F"] = np.linalg.norm(
+            residuals, ord="fro"
+        )
+        self.loss_terms["|| h1 ||_F"] = np.linalg.norm(self.h1, ord="fro")
+        self.loss_terms["|| h2 ||_F"] = np.linalg.norm(self.h2, ord="fro")
+
+        grad_h1 = residuals @ self.h2.T + self.regularization_parameters["λg"] * self.h1
+        grad_h2 = self.h1.T @ residuals + self.regularization_parameters["λd"] * self.h2
         return np.vstack([grad_h1, grad_h2.T])

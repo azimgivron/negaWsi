@@ -91,10 +91,17 @@ The corresponding objective is:
 $$
 \min_{W,H}
 \frac{1}{2}\|B \odot (R - XWH^\top Y^\top)\|_F^2
-+ \lambda_g\|W\|_F^2
-+ \lambda_d\|H\|_F^2
++ \frac{\lambda_g}{2} \|W\|_F^2
++ \frac{\lambda_d}{2} \|H\|_F^2
 $$
 
+It's gradient is given by:
+$$
+\begin{aligned}
+\nabla_W \; &=\; \,X^\top\!\bigl(B \odot (XWH^\top Y^\top - R)\bigr)\,Y\,H \;+\;\lambda_g\,W \\[4pt]
+\nabla_H \; &=\; \,Y^\top\!\bigl(B \odot (XWH^\top Y^\top - R)\bigr)^\top X\,W \;+\;\lambda_d\,H
+\end{aligned}
+$$
 ### 5.2. SI via Regularized Latent Alignment
 
 Following the GeneHound model, side information is linked to the latent variables through regularization:
@@ -103,16 +110,59 @@ $$
 \begin{aligned}
 \min_{W,H,\beta_g,\beta_d} \;
 & \frac{1}{2}\|B \odot (R - WH^\top)\|_F^2
-+ \frac{\lambda_g}{2}\|\beta_g\|_F^2
-+ \frac{\lambda_d}{2}\|\beta_d\|_F^2 \\
-& + \frac{\lambda_{\beta_g}}{2}\|P_W W - X\beta_g\|_F^2
-+ \frac{\lambda_{\beta_d}}{2}\|P_H H - Y\beta_d\|_F^2
++ \frac{\lambda_{\beta_g}}{2}\|\beta_g\|_F^2
++ \frac{\lambda_{\beta_d}}{2}\|\beta_d\|_F^2 \\
+& + \frac{\lambda_{g}}{2}\|P_W W - X\beta_g\|_F^2
++ \frac{\lambda_{d}}{2}\|P_H H - Y\beta_d\|_F^2
 \end{aligned}
 $$
 
 where $P_W, P_H$ are centering matrices enforcing mean-zero latent representations.
 
-This formulation assumes Gaussian priors on parameters and residuals, while preserving the convergence guarantees of NEGA.
+This formulation assumes Gaussian priors on parameters and residuals, while preserving the convergence guarantees of NEGA. It's gradient is given by:
+$$
+\begin{aligned}
+\nabla_W \; &=\; (B \odot (WH^\top - R))\,H \;+\; \lambda_g\, P_W\bigl(P_W W - X\beta_g\bigr)\\[4pt]
+\nabla_H \; &=\; (B \odot (WH^\top - R))^\top W \;+\; \lambda_d\, P_H\bigl(P_H H - Y\beta_d\bigr)\\[6pt]
+\nabla_{\beta_g} \; &=\; \lambda_g\, X^\top\!\bigl(X\beta_g - P_W W\bigr) \;+\; \lambda_{\beta_g}\,\beta_g\\[4pt]
+\nabla_{\beta_d} \; &=\; \lambda_d\, Y^\top\!\bigl(Y\beta_d - P_H H\bigr) \;+\; \lambda_{\beta_d}\,\beta_d
+\end{aligned}
+$$
+
+Here is a concise, mathematically consistent section for your documentation:
+
+---
+
+### 5.3. Graph-Based Regularization (ENEGA-FS)
+
+We further extend NEGA-FS by introducing **Enhanced NEGA-FS (ENEGA-FS)**, which incorporates the topology of the protein–protein interaction (PPI) network through a **graph Laplacian regularization term**. The PPI network is represented by a weighted adjacency matrix $A \in \mathbb{R}^{n \times n}$, from which the Laplacian is constructed as $L_g = D_g - A$, with $D_g = \mathrm{diag}(A \mathbf{1})$ being the degree matrix.
+
+The optimization problem becomes:
+$$
+\min_{W, H}
+\frac{1}{2}\|B \odot (R - XWH^{\top}Y^{\top})\|_F^2
++ \frac{\lambda_g}{2}\|W\|_F^2
++ \frac{\lambda_d}{2}\|H\|_F^2
++ \frac{\lambda_{\mathcal{G}}}{2}\operatorname{Tr}(W^{\top}X^{\top}L_g XW)
+$$
+
+where the last term enforces **graph smoothness**, encouraging genes connected in the PPI network to have similar latent representations.
+
+The gradients are given by:
+
+$$
+\begin{aligned}
+\nabla_W &= X^{\top}(B \odot (XWH^{\top}Y^{\top} - R))YH
++ \lambda_g W
++ \lambda_{\mathcal{G}} X^{\top}L_g X W \\[3pt]
+\nabla_H &= Y^{\top}(B \odot (XWH^{\top}Y^{\top} - R))^{\top}XW
++ \lambda_d H
+\end{aligned}
+$$
+
+This formulation jointly exploits **feature-based** and **network-based** information, aligning the learned gene embeddings with the structure of the PPI graph.
+
+
 
 ## 7. Repository Structure
 

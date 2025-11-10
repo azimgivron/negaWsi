@@ -8,7 +8,7 @@ This module implements the template for Non-Euclidean Gradient Algorithm.
 import abc
 import logging
 import time
-from typing import Tuple
+from typing import Tuple, Dict
 
 import numpy as np
 
@@ -32,7 +32,7 @@ class NegaBase(metaclass=abc.ABCMeta):
         test_mask (np.ndarray): Boolean mask indicating observed entries in `matrix`
             for testing. Shape: (n, m).
         rank (int): The target rank for the low-rank approximation.
-        regularization_parameter (float): Regularization parameter used in the optimization
+        regularization_parameters (float): Regularization parameters used in the optimization
             objective.
         iterations (int): Maximum number of optimization iterations.
         symmetry_parameter (float): Parameter used to adjust gradient symmetry during
@@ -51,6 +51,8 @@ class NegaBase(metaclass=abc.ABCMeta):
             a fraction of positive (1) entries to negatives (0) in the training mask.
         early_stopping (EarlyStopping or None): Mechanism for monitoring training loss and
             triggering early termination of training if the performance does not improve.
+        loss_terms (Dict[str, float]): Logger for loss terms tracking.
+
     """
 
     def __init__(
@@ -59,7 +61,7 @@ class NegaBase(metaclass=abc.ABCMeta):
         train_mask: np.ndarray,
         test_mask: np.ndarray,
         rank: int,
-        regularization_parameter: float,
+        regularization_parameters: Dict[str, float],
         iterations: int,
         symmetry_parameter: float,
         smoothness_parameter: float,
@@ -82,7 +84,7 @@ class NegaBase(metaclass=abc.ABCMeta):
             test_mask (np.ndarray): Mask indicating observed entries in `matrix` for testing.
                 Shape: (n, m).
             rank (int): Desired rank for the low-rank approximation.
-            regularization_parameter (float): Regularization parameter for the optimization
+            regularization_parameters (Dict[str, float],): Regularization parameters for the optimization
                 objective.
             iterations (int): Maximum number of optimization iterations.
             symmetry_parameter (float): Parameter for adjusting gradient symmetry during
@@ -106,7 +108,7 @@ class NegaBase(metaclass=abc.ABCMeta):
         self.train_mask = train_mask
         self.test_mask = test_mask
         self.rank = rank
-        self.regularization_parameter = regularization_parameter
+        self.regularization_parameters = regularization_parameters
         self.iterations = iterations
         self.symmetry_parameter = symmetry_parameter
         self.smoothness_parameter = smoothness_parameter
@@ -117,6 +119,7 @@ class NegaBase(metaclass=abc.ABCMeta):
         self.h2 = None
         self.flip_labels = flip_labels
         self.early_stopping = early_stopping
+        self.loss_terms = {}
 
         # Set random seed for reproducibility
         np.random.seed(seed)
@@ -478,6 +481,12 @@ class NegaBase(metaclass=abc.ABCMeta):
                 loss[-1],
             )
             grad_f_W_k = self.compute_grad_f_W_k()
+            for key, value in self.loss_terms.items():
+                self.logger.debug(
+                    ("[Main Loop] %s: %.6e"),
+                    key,
+                    value,
+                )
 
             substep_res = self.substep(W_k, tau, step_size, grad_f_W_k)
             if substep_res is None:
