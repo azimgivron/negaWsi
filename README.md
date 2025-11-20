@@ -84,7 +84,7 @@ where:
 
 * $X \in \mathbb{R}^{n \times g}$ encodes gene features,
 * $Y \in \mathbb{R}^{m \times d}$ encodes disease features,
-* $W \in \mathbb{R}^{g \times k}$, $H \in \mathbb{R}^{d \times k}$.
+* $W \in \mathbb{R}^{g \times k}$, $H \in \mathbb{R}^{d \times k}$ are the low-rank latent matrices.
 
 The corresponding objective is:
 

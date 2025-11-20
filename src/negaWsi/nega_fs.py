@@ -97,6 +97,24 @@ class NegaFS(NegaBase):
             method,
         )
 
+    @property
+    def gene_latent(self) -> np.ndarray:
+        """Compute gene latent matrix
+
+        Returns:
+            np.ndarray: The latent matrix. Shape is (k x n).
+        """
+        return self.gene_side_info @ self.h1
+    
+    @property
+    def disease_latent(self) -> np.ndarray:
+        """Compute disease latent matrix
+
+        Returns:
+            np.ndarray: The latent matrix. Shape is (k x m).
+        """
+        return self.h2 @ self.disease_side_info.T
+
     def init_tau(self) -> float:
         """
         Initialize tau value.
@@ -162,7 +180,7 @@ class NegaFS(NegaBase):
         Returns:
             np.ndarray: The reconstructed (completed) matrix.
         """
-        return (self.gene_side_info @ self.h1) @ (self.h2 @ self.disease_side_info.T)
+        return self.gene_latent @ self.disease_latent
 
     def compute_grad_f_W_k(self) -> np.ndarray:
         """Compute the gradients for each latent as:
@@ -185,10 +203,11 @@ class NegaFS(NegaBase):
         self.loss_terms["|| h1 ||_F"] = np.linalg.norm(self.h1, ord="fro")
         self.loss_terms["|| h2 ||_F"] = np.linalg.norm(self.h2, ord="fro")
         grad_h1 = (
-            self.gene_side_info.T @ (residuals @ (self.disease_side_info @ self.h2.T))
+            self.gene_side_info.T @ (residuals @ self.disease_latent.T)
             + self.regularization_parameters["λg"] * self.h1
         )
         grad_h2 = (
-            ((self.gene_side_info @ self.h1).T @ residuals)
-        ) @ self.disease_side_info + self.regularization_parameters["λd"] * self.h2
+            (self.gene_latent.T @ residuals) @ self.disease_side_info
+            + self.regularization_parameters["λd"] * self.h2
+        )
         return np.vstack([grad_h1, grad_h2.T])

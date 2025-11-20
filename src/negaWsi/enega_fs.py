@@ -71,15 +71,15 @@ class ENegaFS(NegaFS):
         self.loss_terms["|| h1 ||_F"] = np.linalg.norm(self.h1, ord="fro")
         self.loss_terms["|| h2 ||_F"] = np.linalg.norm(self.h2, ord="fro")
         graph_term = self.gene_side_info.T @ (
-            self.laplacian @ (self.gene_side_info @ self.h1)
+            self.laplacian @ self.gene_latent
         )
         self.loss_terms["Tr(h1.T @ X.T @ L @ X @ h1)"] = np.sum(self.h1 * graph_term)
         grad_h1 = (
-            self.gene_side_info.T @ (residuals @ (self.disease_side_info @ self.h2.T))
+            self.gene_side_info.T @ (residuals @ self.disease_latent.T)
             + self.regularization_parameters["λg"] * self.h1
             + self.regularization_parameters["λG"] * graph_term
         )
         grad_h2 = (
-            ((self.gene_side_info @ self.h1).T @ residuals)
+            (self.gene_latent.T @ residuals)
         ) @ self.disease_side_info + self.regularization_parameters["λd"] * self.h2
         return np.vstack([grad_h1, grad_h2.T])

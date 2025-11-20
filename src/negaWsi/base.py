@@ -95,8 +95,6 @@ class NegaBase(metaclass=abc.ABCMeta):
             rho_decrease (float): Multiplicative factor to dynamically decrease the optimization
                 step size.
             threshold (int): Maximum number of iterations for the inner optimization loop.
-            writer (tf.summary.SummaryWriter, optional): TensorFlow summary writer for logging
-                training summaries. Defaults to None.
             seed (int, optional): Seed for reproducible random initialization. Defaults to 123.
             flip_labels (FlipLabels, optional): Object that simulates label noise by randomly
                 flipping a fraction of positive (1) entries to negatives (0) in the training mask.
@@ -190,6 +188,24 @@ class NegaBase(metaclass=abc.ABCMeta):
             weight_matrix (np.ndarray): The stacked block matrix.
         """
         raise NotImplementedError
+    
+    @property
+    def gene_latent(self) -> np.ndarray:
+        """Compute gene latent matrix
+
+        Returns:
+            np.ndarray: The latent matrix. Shape is (k x n).
+        """
+        return self.h1
+    
+    @property
+    def disease_latent(self) -> np.ndarray:
+        """Compute disease latent matrix
+
+        Returns:
+            np.ndarray: The latent matrix. Shape is (k x m).
+        """
+        return self.h2
 
     def cardano(self, tau: float, delta: float) -> float:
         """
