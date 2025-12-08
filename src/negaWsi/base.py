@@ -8,9 +8,10 @@ This module implements the template for Non-Euclidean Gradient Algorithm.
 import abc
 import logging
 import time
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Literal
 
 import numpy as np
+from scipy.optimize import minimize
 
 from negaWsi.early_stopping import EarlyStopping
 from negaWsi.flip_labels import FlipLabels
@@ -159,7 +160,6 @@ class NegaBase(metaclass=abc.ABCMeta):
         """
         raise NotImplementedError
 
-    @abc.abstractmethod
     def init_tau(self) -> float:
         """
         Initialize tau value.
@@ -167,9 +167,8 @@ class NegaBase(metaclass=abc.ABCMeta):
         Returns:
             float: tau value.
         """
-        raise NotImplementedError
+        return np.linalg.norm(self.matrix, ord="fro") / 3
 
-    @abc.abstractmethod
     def init_Wk(self) -> np.ndarray:
         """
         Initialize weight block matrix.
@@ -177,9 +176,8 @@ class NegaBase(metaclass=abc.ABCMeta):
         Returns:
             np.ndarray: The weight block matrix.
         """
-        raise NotImplementedError
+        return np.vstack([self.h1, self.h2.T])
 
-    @abc.abstractmethod
     def set_weights(self, weight_matrix: np.ndarray):
         """
         Set the weights individually from the stacked block matrix.
@@ -187,7 +185,9 @@ class NegaBase(metaclass=abc.ABCMeta):
         Args:
             weight_matrix (np.ndarray): The stacked block matrix.
         """
-        raise NotImplementedError
+        nb_genes = self.h1.shape[0]
+        self.h1 = weight_matrix[:nb_genes, :]
+        self.h2 = weight_matrix[nb_genes:, :].T
     
     @property
     def gene_latent(self) -> np.ndarray:
@@ -332,7 +332,7 @@ class NegaBase(metaclass=abc.ABCMeta):
         return rmse
 
     def callback(
-        self, ith_iteration: int, testing_loss: np.ndarray, grad_f_W_k: np.ndarray
+        self, ith_iteration: int, testing_loss: np.ndarray, grad_f_W_k: np.ndarray, step_size: float
     ):
         """
         Callback to add logs or whatever the user wants compute between 'log_freq'
@@ -344,6 +344,7 @@ class NegaBase(metaclass=abc.ABCMeta):
                 current iteration.
             grad_f_W_k (np.ndarray): The gradient of the loss with respect to the model weights
                 at the current iteration.
+            step_size (float): The step size.
         """
 
     def substep(
@@ -410,6 +411,58 @@ class NegaBase(metaclass=abc.ABCMeta):
         self.set_weights(W_k_next)
         loss = self.calculate_loss()
         return W_k_next, loss
+    
+    def loss_and_grad(self, h_flat: np.ndarray, latent: Literal["h1", "h2"]) -> Tuple[float, np.ndarray]:
+        """
+        Compute the scalar loss and gradient for a flattened latent factor.
+
+        Args:
+            h_flat (np.ndarray): Flattened vector representing the latent.
+            latent (Literal["h1", "h2"]): Indicates which latent matrix is being optimized.
+
+        Returns:
+            Tuple[float, np.ndarray]: Current loss value and the gradient vector shaped
+                for the optimizer.
+        """
+        grad = self.compute_grad_f_W_k()
+        gene_feat_dim = self.h1.shape[0]
+        d = None
+        if latent == "h1":
+            self.h1 = h_flat.reshape(self.h1.shape)
+            grad = grad[:gene_feat_dim, :]
+        elif latent ==  "h2":
+            self.h2 = h_flat.reshape(self.h2.shape)
+            grad = grad[gene_feat_dim:, :].T
+        loss = sum(list(self.loss_terms.values()))
+        self.logger.debug(
+            ("[Euclidean Gradient Step] Loss: %.6e"),
+            loss,
+        )
+        return loss, grad.ravel()
+    
+    def euclidean_gradient_step(self, maxiter: int):
+        """
+        Update latents with conjugate-gradient steps on the Euclidean loss.
+
+        Args:
+            maxiter (int): Maximum number of CG iterations allowed for each latent update.
+        """
+        self.logger.debug("Starting Euclidean Gradient Step")
+        self.h1 = minimize(
+            fun=lambda h1_flat: self.loss_and_grad(h1_flat, "h1"),
+            x0=self.h1.ravel(),
+            method='CG',
+            jac=True,
+            options={'maxiter': maxiter}
+        ).x.reshape(self.h1.shape)
+    
+        self.h2 = minimize(
+            fun=lambda h2_flat: self.loss_and_grad(h2_flat, "h2"),
+            x0=self.h2.ravel(),
+            method='CG',
+            jac=True,
+            options={'maxiter': maxiter}
+        ).x.reshape(self.h2.shape)
 
     def run(self, log_freq: int = 10) -> Result:
         """
@@ -516,7 +569,7 @@ class NegaBase(metaclass=abc.ABCMeta):
                 <= res_norm + linear_approx + self.smoothness_parameter * bregman
             )
             if (ith_iteration + 1) % log_freq == 0 or ith_iteration == 0:
-                self.callback(ith_iteration, testing_loss, grad_f_W_k)
+                self.callback(ith_iteration, testing_loss, grad_f_W_k, step_size)
             while not non_euclidean_descent_lemma_cond:
                 flag = 1
                 inner_loop_it += 1
@@ -579,7 +632,7 @@ class NegaBase(metaclass=abc.ABCMeta):
                 self.set_weights(self.early_stopping.best_weights)
                 self.logger.debug("[Early Stopping] Training interrupted.")
                 if ith_iteration % log_freq != 0:
-                    self.callback(ith_iteration, testing_loss, grad_f_W_k)
+                    self.callback(ith_iteration, testing_loss, grad_f_W_k, step_size)
                 break
         # Compute runtime
         runtime = time.time() - start_time

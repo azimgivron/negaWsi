@@ -58,35 +58,6 @@ class Nega(NegaBase):
             method,
         )
 
-    def init_tau(self) -> float:
-        """
-        Initialize tau value.
-
-        Returns:
-            float: tau value.
-        """
-        return np.linalg.norm(self.matrix, ord="fro") / 3
-
-    def init_Wk(self) -> np.ndarray:
-        """
-        Initialize weight block matrix.
-
-        Returns:
-            np.ndarray: The weight block matrix.
-        """
-        return np.vstack([self.h1, self.h2.T])
-
-    def set_weights(self, weight_matrix: np.ndarray):
-        """
-        Set the weights individually from the stacked block matrix.
-
-        Args:
-            weight_matrix (np.ndarray): The stacked block matrix.
-        """
-        nb_genes = self.h1.shape[0]
-        self.h1 = weight_matrix[:nb_genes, :]
-        self.h2 = weight_matrix[nb_genes:, :].T
-
     def kernel(self, W: np.ndarray, tau: float) -> float:
         """
         Computes the value of the kernel function h for a given matrix W and

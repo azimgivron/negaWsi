@@ -13,7 +13,6 @@ import numpy as np
 from negaWsi.base import NegaBase
 from negaWsi.utils import svd
 
-
 class NegaFS(NegaBase):
     """
     Matrix completion with side information following the Inductive
@@ -114,35 +113,6 @@ class NegaFS(NegaBase):
             np.ndarray: The latent matrix. Shape is (k x m).
         """
         return self.h2 @ self.disease_side_info.T
-
-    def init_tau(self) -> float:
-        """
-        Initialize tau value.
-
-        Returns:
-            float: tau value.
-        """
-        return np.linalg.norm(self.matrix, ord="fro") / 3
-
-    def init_Wk(self) -> np.ndarray:
-        """
-        Initialize weight block matrix.
-
-        Returns:
-            np.ndarray: The weight block matrix.
-        """
-        return np.vstack([self.h1, self.h2.T])
-
-    def set_weights(self, weight_matrix: np.ndarray):
-        """
-        Set the weights individually from the stacked block matrix.
-
-        Args:
-            weight_matrix (np.ndarray): The stacked block matrix.
-        """
-        gene_feat_dim = self.h1.shape[0]
-        self.h1 = weight_matrix[:gene_feat_dim, :]
-        self.h2 = weight_matrix[gene_feat_dim:, :].T
 
     def kernel(self, W: np.ndarray, tau: float) -> float:
         """

@@ -9,8 +9,8 @@ This module implements IMC Algorithm.
 from scipy.optimize import minimize
 import logging
 import time
-from typing import Tuple, Dict, Optional
-
+from typing import Tuple, Dict
+from collections import defaultdict
 import numpy as np
 
 from negaWsi.early_stopping import EarlyStopping
@@ -35,6 +35,7 @@ class IMC:
         regularization_parameters (float): Regularization parameters used in the optimization
             objective.
         iterations (int): Maximum number of optimization iterations.
+        max_inner_iter (int): Maximum number of iterations for the inner optimization loop.
         h1 (np.ndarray): Left factor matrix in the low-rank approximation.
         h2 (np.ndarray): Right factor matrix in the low-rank approximation.
         logger (logging.Logger): Logger instance for debugging and monitoring training progress.
@@ -57,13 +58,12 @@ class IMC:
         rank: int,
         regularization_parameters: Dict[str, float],
         iterations: int,
-        threshold: int,
+        max_inner_iter: int,
         side_info: Tuple[np.ndarray, np.ndarray],
         svd_init: bool = False,
         seed: int = 123,
-        flip_labels: Optional[FlipLabels] = None,
-        early_stopping: Optional[EarlyStopping] = None,
-        max_inner_iter: int = 10
+        flip_labels: FlipLabels = None,
+        early_stopping: EarlyStopping = None,
     ) -> None:
         """Initialize an IMC model with data, masks, side information, and hyperparameters.
 
@@ -78,7 +78,7 @@ class IMC:
             regularization_parameters (Dict[str, float]): Regularization parameters for the optimization
                 objective, expects keys like ``λg`` and ``λd``.
             iterations (int): Maximum number of outer optimization iterations.
-            threshold (int): Threshold used by downstream logic (kept for API compatibility).
+            max_inner_iter (int): Maximum number of iterations for the inner optimization loop.
             side_info (Tuple[np.ndarray, np.ndarray]): Tuple containing
                 (gene_feature_matrix, disease_feature_matrix).
             svd_init (bool, optional): Whether to initialize the latent
@@ -89,8 +89,6 @@ class IMC:
             early_stopping (EarlyStopping, optional): Early stopping object that implements
                 a mechanism for monitoring the validation loss and triggering early termination
                 if performance does not improve.
-            max_inner_iter (int, optional): Maximum number of iterations for the inner optimization loop.
-                Default to 10.
         """
         self.logger = logging.getLogger(self.__class__.__name__)
         self.matrix = matrix
@@ -99,13 +97,14 @@ class IMC:
         self.rank = rank
         self.regularization_parameters = regularization_parameters
         self.iterations = iterations
-        self.threshold = threshold
         self.h1 = None
         self.h2 = None
         self.flip_labels = flip_labels
         self.early_stopping = early_stopping
         self.loss_terms = {}
         self.max_inner_iter = max_inner_iter
+        self.logs = defaultdict(list)
+        self.ith_iteration = 0
 
         # Set random seed for reproducibility
         np.random.seed(seed)
@@ -265,19 +264,10 @@ class IMC:
         rmse = np.sqrt(((actual_values - predictions) ** 2).mean())
         return rmse
 
-    def callback(
-        self, ith_iteration: int, testing_loss: np.ndarray, grad_f_W_k: np.ndarray
-    ) -> None:
+    def callback(self) -> None:
         """
         Callback to add logs or whatever the user wants compute between 'log_freq'
         number of outer loop iterations.
-
-        Args:
-            ith_iteration (int): The current iteration index at which the logging is performed.
-            testing_loss (np.ndarray): The computed loss value for the testing dataset at the
-                current iteration.
-            grad_f_W_k (np.ndarray): The gradient of the loss with respect to the model weights
-                at the current iteration.
         """
 
     def objective_and_grad_h1(self, h1_flat: np.ndarray) -> Tuple[float, np.ndarray]:
@@ -303,6 +293,17 @@ class IMC:
             self.gene_side_info.T @ (residuals @ self.disease_latent.T)
             + self.regularization_parameters["λg"] * self.h1
         )
+        self.logger.debug(
+            ("[Euclidean Gradient Step h1] Loss: %.6e"),
+            loss,
+        )
+
+        rows, columns = self.matrix.shape
+        nb_elements = rows * columns
+        training_loss = data_loss / nb_elements
+        self.logs['test'].append(self.calculate_rmse(self.test_mask))
+        self.logs['training'].append(training_loss)
+
         return loss, grad_h1.ravel()
     
     def objective_and_grad_h2(self, h2_flat: np.ndarray) -> Tuple[float, np.ndarray]:
@@ -328,15 +329,26 @@ class IMC:
             (self.gene_latent.T @ residuals) @ self.disease_side_info
             + self.regularization_parameters["λd"] * self.h2
         )
+        self.logger.debug(
+            ("[Euclidean Gradient Step h2] Loss: %.6e"),
+            loss,
+        )
+        
+        rows, columns = self.matrix.shape
+        nb_elements = rows * columns
+        training_loss = data_loss / nb_elements
+        self.logs['test'].append(self.calculate_rmse(self.test_mask))
+        self.logs['training'].append(training_loss)
+
         return loss, grad_h2.ravel()
 
-    def run(self, log_freq: int = 10) -> Result:
+    def run(self, log_freq: int = 1) -> Result:
         """
         Train the IMC model by alternating conjugate gradient updates on h1 and h2.
 
         Args:
             log_freq (int, optional): Period at which to log data in Tensorboard.
-                Default to 10 (iterations).
+                Default to 1 (iterations).
 
         Returns:
             Result: A dataclass containing:
@@ -348,34 +360,16 @@ class IMC:
         """
         # Start measuring runtime
         start_time = time.time()
-        rows, columns = self.matrix.shape
-        nb_elements = rows * columns
-
-        # Initialize loss and RMSE history
-        res_norm = self.calculate_loss()
-        training_loss = res_norm / nb_elements
-        testing_loss = self.calculate_rmse(self.test_mask)
-        loss = [training_loss]
-        rmse = [testing_loss]
 
         self.logger.debug(
             "Starting optimization"
         )
+        rmse_history = []
+        loss_history = []
 
         # Main optimization loop
-        iterations_count = 0
+        self.ith_iteration = 0
         for ith_iteration in range(self.iterations):
-            iterations_count = ith_iteration
-
-            self.logger.debug(
-                (
-                    "[Main Loop] Iteration %d, Inner Loop %d:"
-                    " RMSE=%.6e (testing), Mean Loss=%.6e (training)"
-                ),
-                ith_iteration,
-                rmse[-1],
-                loss[-1],
-            )
             for key, value in self.loss_terms.items():
                 self.logger.debug(
                     ("[Main Loop] %s: %.6e"),
@@ -391,7 +385,7 @@ class IMC:
                 options={'maxiter': self.max_inner_iter}
             )
             self.h1 = res_h1.x.reshape(self.h1.shape)
-        
+            
             res_h2 = minimize(
                 fun=lambda h2_flat: self.objective_and_grad_h2(h2_flat),
                 x0=self.h2.ravel(),
@@ -400,32 +394,41 @@ class IMC:
                 options={'maxiter': self.max_inner_iter}
             )
             self.h2 = res_h2.x.reshape(self.h2.shape)
-
-            training_loss = self.calculate_loss() / nb_elements
-            testing_loss = self.calculate_rmse(self.test_mask)
-            loss.append(training_loss)
-            rmse.append(testing_loss)
             W_k = np.vstack([self.h1, self.h2.T])
+            self.logger.debug(
+                (
+                    "[Main Loop] Iteration %d:"
+                    " RMSE=%.6e (testing), Mean Loss=%.6e (training)"
+                ),
+                ith_iteration,
+                self.logs['test'][-1],
+                self.logs['training'][-1],
+            )
             if self.early_stopping is not None and self.early_stopping(
-                testing_loss, W_k
+                self.logs['test'][-1], W_k
             ):
                 weight_matrix = self.early_stopping.best_weights
                 gene_feat_dim = self.h1.shape[0]
                 self.h1 = weight_matrix[:gene_feat_dim, :]
                 self.h2 = weight_matrix[gene_feat_dim:, :].T
                 self.logger.debug("[Early Stopping] Training interrupted.")
-                if ith_iteration % log_freq != 0:
-                    self.callback(ith_iteration, testing_loss, None)
                 break
+            if (ith_iteration + 1) % log_freq == 0 or ith_iteration == 0:
+                self.callback()
+                rmse_history.extend(self.logs['test'])
+                loss_history.extend(self.logs['training'])
+                self.logs['test'].clear()
+                self.logs['training'].clear()
+        self.callback()
         # Compute runtime
         runtime = time.time() - start_time
         self.logger.debug(
             "[Completion] Optimization finished in %.2f seconds.", runtime
         )
         training_data = Result(
-            loss_history=loss,
-            iterations=iterations_count,
-            rmse_history=rmse,
+            loss_history=loss_history,
+            iterations=self.ith_iteration,
+            rmse_history=rmse_history,
             runtime=runtime,
         )
         return training_data
