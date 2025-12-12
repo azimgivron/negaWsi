@@ -23,14 +23,10 @@ class NegaReg(NegaBase):
 
         Minimize:
             0.5 * || B ⊙ (h1 @ h2 - M) ||_F^2
-            + 0.5 * λg * || P_n @ h1 - G @ β_G ||_F^2
-            + 0.5 * λd * || h2 @ P_m - β_D.T @ D.T ||_F^2
+            + 0.5 * λg * || h1 - G @ β_G ||_F^2
+            + 0.5 * λd * || h2 - β_D.T @ D.T ||_F^2
             + 0.5 * λ_βg * || β_G ||_F^2
             + 0.5 * λ_βd * || β_D ||_F^2
-
-        where:
-            P_n = I_n - (1/n) * 1_n @ 1_n.T
-            P_m = I_m - (1/m) * 1_m @ 1_m.T
 
     Attributes:
         gene_side_info (np.ndarray): Side information for genes (G ∈ R^{n x g}).
@@ -45,7 +41,6 @@ class NegaReg(NegaBase):
         self,
         *args,
         side_info: Tuple[np.ndarray, np.ndarray],
-        side_information_reg: float,
         svd_init: bool = False,
         **kwargs,
     ):
@@ -57,8 +52,6 @@ class NegaReg(NegaBase):
             side_info (Tuple[np.ndarray, np.ndarray]):
                 A tuple (G, D) of dense matrices containing gene side information
                 G (n x g) and disease side information D (m x d).
-            side_information_reg (float): Regularization weight for
-                for the side information.
             svd_init (bool, optional): Whether to initialize the latent
                 matrices with SVD decomposition. Default to False.
             **kwargs: Additional keyword arguments forwarded to BaseNEGA.
@@ -67,8 +60,6 @@ class NegaReg(NegaBase):
             ValueError: If side_info is None or if matrix and side-info dimensions mismatch.
         """
         super().__init__(*args, **kwargs)
-
-        self.side_information_reg = side_information_reg
 
         if side_info is None:
             raise ValueError("Side information must be provided.")
@@ -142,19 +133,55 @@ class NegaReg(NegaBase):
         ]
         self.beta_d = weight_matrix[(nb_genes + nb_diseases + gene_feat_dim) :, :]
 
-    def kernel(self, W: np.ndarray, tau: float) -> float:
+    def calculate_loss(self) -> float:
         """
-        Compute the kernel function h(W) = 0.25 * ||W||_F^4 + 0.5 * tau * ||W||_F^2.
+        Computes the loss function value for the training data.
 
-        Args:
-            W (np.ndarray): Latent parameter matrix.
-            tau (float): Regularization parameter.
+        The loss is defined as the Frobenius norm of the residual matrix
+        for observed entries only:
+            Loss = 0.5 * || B ⊙ (h1 @ h2 - M) ||_F^2
+            + 0.5 * λg * || h1 - G @ β_G ||_F^2
+            + 0.5 * λd * || h2 - β_D.T @ D.T ||_F^2
+            + 0.5 * λ_βg * || β_G ||_F^2
+            + 0.5 * λ_βd * || β_D ||_F^2
 
         Returns:
-            float: Kernel value.
+            float: The computed loss value.
         """
-        norm = np.linalg.norm(W, ord="fro")
-        return 0.25 * norm**4 + 0.5 * tau * norm**2
+        residuals = self.calculate_training_residual()
+        self.loss_terms["|| B ⊙ (h1 @ h2 - M) ||_F"] = np.linalg.norm(
+            residuals, ord="fro"
+        )
+
+        gene_prediction = self.gene_side_info @ self.beta_g  # G @ β_G (nb_genes, k)
+        h1_residual = (
+            self.h1 - gene_prediction
+        ) # h1 - G @ β_G (nb_genes, k)
+        self.loss_terms["|| h1 - G @ β_G ||_F"] = np.linalg.norm(
+            h1_residual, ord="fro"
+        )
+        self.loss_terms["|| β_G ||_F"] = np.linalg.norm(self.beta_g, ord="fro")
+
+        disease_prediction = (
+            self.beta_d.T @ self.disease_side_info.T
+        )  # β_D.T @ D.T (k, nb_diseases)
+        h2_residual = (
+            self.h2 - disease_prediction
+        )  # h2 - β_D.T @ D.T (k, nb_diseases)
+
+        self.loss_terms["|| h2 - β_D.T @ D.T ||_F"] = np.linalg.norm(
+            h2_residual, ord="fro"
+        )
+        self.loss_terms["|| β_D ||_F"] = np.linalg.norm(self.beta_d, ord="fro")
+
+        loss = 0.5 * (
+            self.loss_terms["|| B ⊙ (h1 @ h2 - M) ||_F"] ** 2
+            + self.regularization_parameters["λg"] * self.loss_terms["|| h1 - G @ β_G ||_F"] ** 2 
+            + self.regularization_parameters["λd"] * self.loss_terms["|| h2 - β_D.T @ D.T ||_F"] ** 2
+            + self.regularization_parameters["λ_βg"] * self.loss_terms["|| β_G ||_F"] ** 2
+            + self.regularization_parameters["λ_βd"] * self.loss_terms["|| β_D ||_F"] ** 2
+        )
+        return loss
 
     def predict_all(self) -> np.ndarray:
         """
@@ -172,15 +199,13 @@ class NegaReg(NegaBase):
         grad_f_W_k = (∇_h1, ∇_h2.T, ∇_beta_g, ∇_beta_d).T
 
         with:
-            * ∇_h1 = R @ h2.T + λg * P_n @ (P_n @ h1 - G @ β_G)
-            * ∇_h2 = h1.T @ R + λd * (h2 @ P_m - β_D.T @ D.T) @ P_m
-            * ∇_beta_g = -λg * G.T @ (P_n @ h1 - G @ β_G) + λ_βg * β_G
-            * ∇_beta_d = -λd * D.T @ (h2 @ P_m - β_D.T @ D.T).T + λ_βd * β_D
+            * ∇_h1 = R @ h2.T + λg * (h1 - G @ β_G)
+            * ∇_h2 = h1.T @ R + λd * (h2 - β_D.T @ D.T)
+            * ∇_beta_g = -λg * G.T @ (h1 - G @ β_G) + λ_βg * β_G
+            * ∇_beta_d = -λd * D.T @ (h2 - β_D.T @ D.T).T + λ_βd * β_D
 
         where
             R = B ⊙ (h1 @ h2 - M)
-            P_n = I_n - (1/n) * 1_n @ 1_n.T
-            P_m = I_m - (1/m) * 1_m @ 1_m.T
 
         Returns:
             np.ndarray: The gradient of the latents ((m+n+g+d) x rank)
@@ -188,60 +213,38 @@ class NegaReg(NegaBase):
         residuals = (
             self.calculate_training_residual()
         )  # B ⊙ (h1 @ h2 - M) shape (nb_genes, nb_diseases)
-        self.loss_terms["|| B ⊙ (h1 @ h2 - M) ||_F"] = np.linalg.norm(
-            residuals, ord="fro"
-        )
-        nb_genes, nb_diseases = self.matrix.shape
-
-        # centering operators
-        gene_centering = np.eye(nb_genes) - np.ones((nb_genes, nb_genes)) / nb_genes
-        disease_centering = (
-            np.eye(nb_diseases) - np.ones((nb_diseases, nb_diseases)) / nb_diseases
-        )
 
         gene_prediction = self.gene_side_info @ self.beta_g  # G @ β_G (nb_genes, k)
-        h1_residual_centered = (
-            gene_centering @ self.h1 - gene_prediction
-        )  # P_n @ h1 - G @ β_G (nb_genes, k)
-        self.loss_terms["|| P_n @ h1 - G @ β_G ||_F"] = np.linalg.norm(
-            h1_residual_centered, ord="fro"
-        )
-        self.loss_terms["|| β_G ||_F"] = np.linalg.norm(self.beta_g, ord="fro")
-
+        h1_residual = (
+            self.h1 - gene_prediction
+        )  # h1 - G @ β_G (nb_genes, k)
         disease_prediction = (
             self.beta_d.T @ self.disease_side_info.T
         )  # β_D.T @ D.T (k, nb_diseases)
-        h2_residual_centered = (
-            self.h2 @ disease_centering - disease_prediction
-        )  # h2 @ P_m - β_D.T @ D.T (k, nb_diseases)
-
-        self.loss_terms["|| h2 @ P_m - β_D.T @ D.T ||_F"] = np.linalg.norm(
-            h2_residual_centered, ord="fro"
-        )
-        self.loss_terms["|| β_D ||_F"] = np.linalg.norm(self.beta_d, ord="fro")
+        h2_residual = (
+            self.h2 - disease_prediction
+        )  # h2 - β_D.T @ D.T (k, nb_diseases)
 
         grad_h1 = (
-            -residuals @ self.h2.T
+            residuals @ self.h2.T
             + self.regularization_parameters["λg"]
-            * gene_centering
-            @ h1_residual_centered
+            * h1_residual
         )
         grad_h2 = (
-            -self.h1.T @ residuals
+            self.h1.T @ residuals
             + self.regularization_parameters["λd"]
-            * h2_residual_centered
-            @ disease_centering
+            * h2_residual
         )
         grad_beta_g = (
             -self.regularization_parameters["λg"]
             * self.gene_side_info.T
-            @ h1_residual_centered
+            @ h1_residual
             + self.regularization_parameters["λ_βg"] * self.beta_g
         )
         grad_beta_d = (
             -self.regularization_parameters["λd"]
             * self.disease_side_info.T
-            @ h2_residual_centered.T
+            @ h2_residual.T
             + self.regularization_parameters["λ_βd"] * self.beta_d
         )
         grad_Wk_next = np.vstack(

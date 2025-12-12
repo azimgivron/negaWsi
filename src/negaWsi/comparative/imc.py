@@ -298,11 +298,10 @@ class IMC:
             loss,
         )
 
-        rows, columns = self.matrix.shape
-        nb_elements = rows * columns
-        training_loss = data_loss / nb_elements
         self.logs['test'].append(self.calculate_rmse(self.test_mask))
-        self.logs['training'].append(training_loss)
+
+        loss_reg2 = 0.5 * self.regularization_parameters["λd"] * np.linalg.norm(self.h2, ord="fro")
+        self.logs['training'].append(loss + loss_reg2)
 
         return loss, grad_h1.ravel()
     
@@ -334,11 +333,10 @@ class IMC:
             loss,
         )
         
-        rows, columns = self.matrix.shape
-        nb_elements = rows * columns
-        training_loss = data_loss / nb_elements
         self.logs['test'].append(self.calculate_rmse(self.test_mask))
-        self.logs['training'].append(training_loss)
+
+        loss_reg2 = 0.5 * self.regularization_parameters["λg"] * np.linalg.norm(self.h1, ord="fro")
+        self.logs['training'].append(loss + loss_reg2)
 
         return loss, grad_h2.ravel()
 

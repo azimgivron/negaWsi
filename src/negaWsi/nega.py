@@ -37,7 +37,6 @@ class Nega(NegaBase):
                 matrices with SVD decomposition. Default to False.
         """
         super().__init__(*args, **kwargs)
-
         if svd_init:
             # Apply the train mask: unobserved entries are set to zero
             observed_matrix = np.zeros_like(self.matrix)
@@ -58,24 +57,30 @@ class Nega(NegaBase):
             method,
         )
 
-    def kernel(self, W: np.ndarray, tau: float) -> float:
+    def calculate_loss(self) -> float:
         """
-        Computes the value of the kernel function h for a given matrix W and
-        regularization parameter tau.
+        Computes the loss function value for the training data.
 
-        The h function is defined as:
-            h(W) = 0.25 * ||W||_F^4 + 0.5 * tau * ||W||_F^2
-
-        Args:
-            W (np.ndarray): The input matrix.
-            tau (float): Regularization parameter.
+        The loss is defined as the Frobenius norm of the residual matrix
+        for observed entries only:
+            Loss = 0.5 * || B ⊙ (h1 @ h2 - M) ||_F^2 + 0.5 * λg * || h1 ||_F^2 + 0.5 * λd * || h2 ||_F^2
 
         Returns:
-            float: The computed value of the h function.
+            float: The computed loss value.
         """
-        norm = np.linalg.norm(W, ord="fro")
-        h_value = 0.25 * norm**4 + 0.5 * tau * norm**2
-        return h_value
+        residuals = self.calculate_training_residual()
+        self.loss_terms["|| B ⊙ (h1 @ h2 - M) ||_F"] = np.linalg.norm(
+            residuals, ord="fro"
+        )
+        self.loss_terms["|| h1 ||_F"] = np.linalg.norm(self.h1, ord="fro")
+        self.loss_terms["|| h2 ||_F"] = np.linalg.norm(self.h2, ord="fro")
+
+        loss = 0.5 * (
+            self.loss_terms["|| B ⊙ (h1 @ h2 - M) ||_F"] ** 2
+            + self.regularization_parameters["λg"] * self.loss_terms["|| h1 ||_F"] ** 2 
+            + self.regularization_parameters["λd"] * self.loss_terms["|| h2 ||_F"] ** 2
+        )
+        return loss
 
     def predict_all(self) -> np.ndarray:
         """
@@ -108,12 +113,6 @@ class Nega(NegaBase):
             np.ndarray: The gradient of the latents ((n+m) x rank)
         """
         residuals = self.calculate_training_residual()
-        self.loss_terms["|| B ⊙ (h1 @ h2 - M) ||_F"] = np.linalg.norm(
-            residuals, ord="fro"
-        )
-        self.loss_terms["|| h1 ||_F"] = np.linalg.norm(self.h1, ord="fro")
-        self.loss_terms["|| h2 ||_F"] = np.linalg.norm(self.h2, ord="fro")
-
         grad_h1 = residuals @ self.h2.T + self.regularization_parameters["λg"] * self.h1
         grad_h2 = self.h1.T @ residuals + self.regularization_parameters["λd"] * self.h2
         return np.vstack([grad_h1, grad_h2.T])

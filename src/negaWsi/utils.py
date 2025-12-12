@@ -1,7 +1,7 @@
 from typing import Tuple
 
 import numpy as np
-import scipy.sparse as sp
+import scipy.linalg as linalg
 
 
 def svd(matrix: np.ndarray, rank: int) -> Tuple[np.ndarray, np.ndarray]:
@@ -21,15 +21,13 @@ def svd(matrix: np.ndarray, rank: int) -> Tuple[np.ndarray, np.ndarray]:
         left_singular_vectors,
         singular_values,
         right_singular_vectors_t,
-    ) = sp.linalg.svd(matrix, full_matrices=False)
+    ) = linalg.svd(matrix, full_matrices=False)
 
     left_vectors_truncated = left_singular_vectors[:, :rank]
     singular_values_truncated = singular_values[:rank]
     right_vectors_t_truncated = right_singular_vectors_t[:rank, :]
 
-    left_factor = left_vectors_truncated * np.sqrt(
-        singular_values_truncated[np.newaxis, :]
-    )
-    right_factor = np.sqrt(singular_values_truncated) * right_vectors_t_truncated
+    left_factor = left_vectors_truncated * np.sqrt(singular_values_truncated[np.newaxis, :])
+    right_factor = np.sqrt(singular_values_truncated[:, np.newaxis]) * right_vectors_t_truncated
 
     return left_factor, right_factor
