@@ -24,7 +24,7 @@ class ENegaFS(NegaFS):
             0.5 * || B ⊙ (X @ h1 @ h2 @ Y.T - M) ||_F^2
             + 0.5 * λg * || h1 ||_F^2
             + 0.5 * λd * || h2 ||_F^2
-            + 0.5 * λd * Tr(h1.T @ X.T @ L @ X @ h1)
+            + 0.5 * λG * Tr(h1.T @ X.T @ L @ X @ h1)
 
     Attributes:
         gene_side_info (np.ndarray): Side information for genes (G ∈ R^{n x g}).
@@ -50,6 +50,55 @@ class ENegaFS(NegaFS):
         super().__init__(*args, **kwargs)
         self.laplacian = np.diag(ppi_adjacency.sum(axis=1)) - ppi_adjacency
 
+    @property
+    def manifold_reg(self) -> float:
+        """Compute the maifold regularization term : Tr(h1.T @ X.T @ L @ X @ h1)
+
+        We use the property: Tr(A.T @ B) = \sum_{i,j} A_{ij} * B_{ij}
+        so:
+
+            Tr(h1.T @ X.T @ L @ X @ h1) = Tr(h_1.T @ G) = \sum_{i,j} h_1_{ij} * G_{ij}
+        
+        with G = X.T @ L @ X @ h_1
+
+        Returns:
+            float: The manifold regularization term.
+        """
+        G = self.gene_side_info.T @ (
+            self.laplacian @ self.gene_latent
+        )
+        return np.sum(self.h1 * G)
+
+    def calculate_loss(self) -> float:
+        """
+        Computes the loss function value for the training data.
+
+        The loss is defined as the Frobenius norm of the residual matrix
+        for observed entries only:
+            Loss = 0.5 * || B ⊙ (X @ h1 @ h2 @ Y.T - M) ||_F^2
+            + 0.5 * λg * || h1 ||_F^2
+            + 0.5 * λd * || h2 ||_F^2
+            + 0.5 * λG * Tr(h1.T @ X.T @ L @ X @ h1)
+
+        Returns:
+            float: The computed loss value.
+        """
+        residuals = self.calculate_training_residual()
+        self.loss_terms["|| B ⊙ (X @ h1 @ h2 @ Y.T - M) ||_F"] = np.linalg.norm(
+            residuals, ord="fro"
+        )
+        self.loss_terms["|| h1 ||_F"] = np.linalg.norm(self.h1, ord="fro")
+        self.loss_terms["|| h2 ||_F"] = np.linalg.norm(self.h2, ord="fro")
+        self.loss_terms["Tr(h1.T @ X.T @ L @ X @ h1)"] = self.manifold_reg
+
+        loss = 0.5 * (
+            self.loss_terms["|| B ⊙ (X @ h1 @ h2 @ Y.T - M) ||_F"] ** 2
+            + self.regularization_parameters["λg"] * self.loss_terms["|| h1 ||_F"] ** 2 
+            + self.regularization_parameters["λd"] * self.loss_terms["|| h2 ||_F"] ** 2
+            + self.regularization_parameters["λG"] * self.loss_terms["Tr(h1.T @ X.T @ L @ X @ h1)"]
+        )
+        return loss
+
     def compute_grad_f_W_k(self) -> np.ndarray:
         """Compute the gradients for each latent as:
 
@@ -65,19 +114,10 @@ class ENegaFS(NegaFS):
             np.ndarray: The gradient of the latents ((g+d) x rank)
         """
         residuals = self.calculate_training_residual()
-        self.loss_terms["|| B ⊙ (X @ h1 @ h2 @ Y.T - M) ||_F"] = np.linalg.norm(
-            residuals, ord="fro"
-        )
-        self.loss_terms["|| h1 ||_F"] = np.linalg.norm(self.h1, ord="fro")
-        self.loss_terms["|| h2 ||_F"] = np.linalg.norm(self.h2, ord="fro")
-        graph_term = self.gene_side_info.T @ (
-            self.laplacian @ self.gene_latent
-        )
-        self.loss_terms["Tr(h1.T @ X.T @ L @ X @ h1)"] = np.sum(self.h1 * graph_term)
         grad_h1 = (
             self.gene_side_info.T @ (residuals @ self.disease_latent.T)
             + self.regularization_parameters["λg"] * self.h1
-            + self.regularization_parameters["λG"] * graph_term
+            + self.regularization_parameters["λG"] * self.manifold_reg
         )
         grad_h2 = (
             (self.gene_latent.T @ residuals)

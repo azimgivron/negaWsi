@@ -15,12 +15,6 @@ def tune_regularization() -> Callable[
 ]:
     """Return a tuner that runs a small Optuna search for stable regularization.
 
-    Args:
-        model_cls: Model class supporting `regularization_parameters` and `run`.
-        reg_space: Search space describing bounds for each regularization key.
-        kwargs: Keyword arguments passed to the model constructor.
-        n_trials: Number of Optuna trials to execute.
-
     Returns:
         Callable: Function that accepts (model_cls, reg_space, kwargs, n_trials)
         and returns the best hyperparameter dictionary.
@@ -32,6 +26,17 @@ def tune_regularization() -> Callable[
         kwargs: Dict,
         n_trials: int,
     ) -> Dict[str, float]:
+        """Fine tuning function.
+
+        Args:
+            model_cls: Model class supporting `regularization_parameters` and `run`.
+            reg_space: Search space describing bounds for each regularization key.
+            kwargs: Keyword arguments passed to the model constructor.
+            n_trials: Number of Optuna trials to execute.
+
+        Returns:
+            Dict[str, float]: The best parameters.
+        """
         def objective(trial: optuna.Trial) -> float:
             reg = {
                 name: trial.suggest_float(name, **params)
@@ -48,159 +53,142 @@ def tune_regularization() -> Callable[
 
     return _tune
 
+def _masks(R: Matrix, p_testval: float, p_val_within: float) -> Tuple[Mask, Mask, Mask]:
+    """Create train/val/test masks for a matrix given split proportions.
 
-@pytest.fixture
-def rank2_case() -> Tuple[Matrix, Mask, Mask]:
-    """Provide the base rank-2 reconstruction toy problem.
+    Args:
+        R: Input matrix to match mask shapes.
+        p_testval: Fraction of entries reserved for validation+test.
+        p_val_within: Fraction of testval entries used for validation.
 
     Returns:
-        Tuple[Matrix, Mask, Mask]: (matrix, train_mask, test_mask).
+        Tuple[Mask, Mask, Mask]: (train_mask, val_mask, test_mask).
     """
-    h1_true = np.array(
-        [
-            [1.0, 0.0],
-            [2.0, 1.0],
-            [0.0, 1.0],
-            [1.0, 1.0],
-        ]
-    )  # (4, 2)
+    N = R.size
+    
+    n_testval = int(np.ceil(N * p_testval))
+    n_val = int(np.ceil(n_testval * p_val_within))
 
-    h2_true = np.array(
-        [
-            [1.0, 0.0, 2.0, 1.0],
-            [0.0, 1.0, 1.0, 2.0],
-        ]
-    )  # (2, 4)
+    rng = np.random.default_rng(seed=0)
+    idx = rng.permutation(N) # all indices, shuffled
+    testval = idx[:n_testval]
+    val_idx = testval[:n_val]
+    test_idx = testval[n_val:]
 
-    R = h1_true @ h2_true  # (4,4)
+    train_mask = np.ones(N, dtype=bool)
+    val_mask = np.zeros(N, dtype=bool)
+    test_mask = np.zeros(N, dtype=bool)
 
-    train_mask = np.array(
-        [
-            [True, True, True, True],
-            [True, True, True, True],
-            [True, False, True, True],
-            [True, True, True, False],
-        ],
-        dtype=bool,
-    )
+    train_mask[testval] = False
+    val_mask[val_idx] = True
+    test_mask[test_idx] = True
 
-    test_mask = ~train_mask.copy()
-    return R, train_mask, test_mask
+    train_mask = train_mask.reshape(R.shape)
+    val_mask = val_mask.reshape(R.shape)
+    test_mask = test_mask.reshape(R.shape)
+    return train_mask, val_mask, test_mask
+
+@pytest.fixture(
+    params=[
+        {"n": 5, "m": 5, "k": 2},
+        {"n": 100, "m": 100, "k": 10},
+    ]
+)
+def nega_case(request: pytest.FixtureRequest) -> Tuple[Matrix, Mask, Mask, Mask, int]:
+    """Provide the reconstruction toy problem.
+
+    Returns:
+        Tuple[Matrix, Mask, Mask, Mask, int]: (matrix, train_mask,
+        val_mask, test_mask, rank).
+    """
+    params = request.param
+    n = params["n"]
+    m = params["m"]
+    k = params["k"]
+
+    rng = np.random.default_rng(0)
+    H1_true = rng.random((n, k))
+    H2_true = rng.random((k, m))
+    R = H1_true @ H2_true
+
+    p_testval = 0.10
+    p_val_within =0.40
+
+    train_mask, val_mask, test_mask = _masks(R, p_testval, p_val_within)
+
+    return R, train_mask, val_mask, test_mask, k
 
 
-@pytest.fixture
-def side_info_case() -> Tuple[Matrix, Mask, Mask, Matrix, Matrix]:
+@pytest.fixture(
+    params=[
+        {"n": 5, "m": 5, "p": 3, "q": 3, "k": 2},
+        {"n": 100, "m": 100, "p": 200, "q": 50, "k": 20},
+    ]
+)
+def side_info_case(request: pytest.FixtureRequest) -> Tuple[Matrix, Mask, Mask, Matrix, Matrix, int]:
     """Provide the inductive side-information toy problem for NegaFS.
 
     Returns:
-        Tuple[Matrix, Mask, Mask, Matrix, Matrix]: (matrix, train_mask,
-        test_mask, gene_features, disease_features).
+        Tuple[Matrix, Mask, Mask, Mask, Matrix, Matrix, int]: (matrix, train_mask,
+        val_mask, test_mask, gene_features, disease_features, rank).
     """
-    X = np.array(
-        [
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            [1.0, 1.0, 0.0],
-        ]
-    )  # (4,3)
+    params = request.param
+    n = params["n"]
+    m = params["m"]
+    p = params["p"]
+    q = params["q"]
+    k = params["k"]
 
-    Y = np.array(
-        [
-            [1.0, 0.0, 0.0, 1.0],
-            [0.0, 1.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0, 1.0],
-        ]
-    )  # (3,4)
+    rng = np.random.default_rng(0)
+    X = rng.random((n, p))
+    Y = rng.random((q, m))
+    H1_true = rng.random((p, k))
+    H2_true = rng.random((k, q))
+    R = X @ H1_true @ H2_true @ Y
+    
+    p_testval = 0.10
+    p_val_within = 0.40
 
-    H1_true = np.array(
-        [
-            [1.0, 0.0],
-            [2.0, 1.0],
-            [0.0, 1.0],
-        ]
-    )  # (3, 2)
+    train_mask, val_mask, test_mask = _masks(R, p_testval, p_val_within)
 
-    H2_true = np.array(
-        [
-            [1.0, 0.0, 2.0],
-            [0.0, 1.0, 1.0],
-        ]
-    )  # (2, 3)
+    return R, train_mask, val_mask, test_mask, X, Y.T, k
 
-    R = X @ H1_true @ H2_true @ Y  # (4,4)
-
-    train_mask = np.array(
-        [
-            [True, True, False, True],
-            [True, True, True, True],
-            [True, False, True, True],
-            [True, True, True, False],
-        ],
-        dtype=bool,
-    )
-
-    test_mask = ~train_mask.copy()
-    return R, train_mask, test_mask, X, Y.T
-
-
-@pytest.fixture
-def reg_side_info_case() -> Tuple[Matrix, Mask, Mask, Matrix, Matrix]:
+@pytest.fixture(
+    params=[
+        {"n": 5, "m": 5, "p": 3, "q": 3, "k": 2},
+        {"n": 100, "m": 100, "p": 200, "q": 50, "k": 20},
+    ]
+)
+def reg_side_info_case(request: pytest.FixtureRequest) -> Tuple[Matrix, Mask, Mask, Matrix, Matrix, int]:
     """Provide the side-information-regularized toy problem for NegaReg.
 
     Returns:
-        Tuple[Matrix, Mask, Mask, Matrix, Matrix]: (matrix, train_mask,
-        test_mask, gene_features, disease_features).
+        Tuple[Matrix, Mask, Mask, Mask, Matrix, Matrix, int]: (matrix, train_mask,
+        val_mask, test_mask, gene_features, disease_features, rank).
     """
-    H1_true = np.array(
-        [
-            [1.0, 0.0],
-            [2.0, 1.0],
-            [0.0, 1.0],
-            [1.0, 1.0],
-        ]
-    )  # (4,2)
+    params = request.param
+    n = params["n"]
+    m = params["m"]
+    p = params["p"]
+    q = params["q"]
+    k = params["k"]
 
-    H2_true = np.array(
-        [
-            [1.0, 0.0, 2.0, 1.0],
-            [0.0, 1.0, 1.0, 2.0],
-        ]
-    )  # (2,4)
+    rng = np.random.default_rng(0)
+    A = rng.random((k, p))
+    B = rng.random((q, k))
+    H1_true = rng.random((n, k))
+    H2_true = rng.random((k, m))
 
-    A = np.array(
-        [
-            [1.0, 0.0, 1.0],
-            [0.0, 1.0, 1.0],
-        ]
-    )  # (2,3)
+    X = H1_true @ A
+    Y = B @ H2_true
+    R = H1_true @ H2_true
 
-    B = np.array(
-        [
-            [1.0, 0.0],
-            [0.0, 1.0],
-            [1.0, 1.0],
-        ]
-    )  # (3,2)
+    p_testval = 0.10
+    p_val_within = 0.40
 
-    X = H1_true @ A  # (4,3)
-    Y = B @ H2_true  # (3,4)
+    train_mask, val_mask, test_mask = _masks(R, p_testval, p_val_within)
 
-    R = H1_true @ H2_true  # (4,4)
-
-    train_mask = np.array(
-        [
-            [True, True, False, True],
-            [True, True, True, True],
-            [True, False, True, True],
-            [True, True, True, False],
-        ],
-        dtype=bool,
-    )
-
-    test_mask = ~train_mask.copy()
-
-    return R, train_mask, test_mask, X, Y.T
+    return R, train_mask, val_mask, test_mask, X, Y.T, k
 
 
 @pytest.fixture

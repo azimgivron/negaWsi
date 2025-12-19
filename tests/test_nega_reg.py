@@ -21,29 +21,40 @@ def test_nega_reg_uses_side_info_regularization(
         tune_regularization: Fixture that tunes regularization parameters with Optuna.
         reg_space_nega_reg: Search space for λg, λd, λ_βg, and λ_βd.
     """
-    R, train_mask, test_mask, X, Y = reg_side_info_case
+    R, train_mask, val_mask, test_mask, X, Y, rank = reg_side_info_case
     kwargs = dict(
         matrix=R,
         train_mask=train_mask,
-        test_mask=test_mask,
-        rank=2,
+        test_mask=val_mask,
+        rank=rank,
         side_info=(X, Y),
-        iterations=1000,
+        iterations=10_000,
         symmetry_parameter=0.99,
         smoothness_parameter=0.001,
         rho_increase=10.0,
         rho_decrease=0.1,
-        threshold=100,
         seed=0,
         svd_init=False,
     )
 
-    best_params = tune_regularization(NegaReg, reg_space_nega_reg, kwargs, n_trials=10)
+    best_params = tune_regularization(NegaReg, reg_space_nega_reg, kwargs, n_trials=100)
+    kwargs["test_mask"] = test_mask
     model = NegaReg(regularization_parameters=best_params, **kwargs)
-    _ = model.run()
+    training_history = model.run()
 
     R_hat = model.predict_all()
     assert np.allclose(R_hat, R, atol=1e-3), (
-        f"NegaReg reconstruction mismatch with params {best_params}:\n"
+        f"Reconstruction mismatch with tuned params {best_params}:\n"
         f"pred=\n{R_hat}\ntruth=\n{R}"
+    )
+    rel_rmse = np.linalg.norm(R_hat - R) / np.linalg.norm(R)
+    assert rel_rmse < 1e-3, (
+        f"Nega reconstruction mismatch with params {best_params}:\n"
+        f"pred=\n{R_hat}\ntruth=\n{R}\ntrain mask=\n{train_mask}\n"
+        f"RelRMSE=\n{rel_rmse}\n"
+    )
+    assert training_history.rmse_history[-1] < 1e-3, (
+        f"Nega reconstruction mismatch with params {best_params}:\n"
+        f"pred=\n{R_hat}\ntruth=\n{R}\ntrain mask=\n{train_mask}\n"
+        f"Final RMSE on Test=\n{training_history.rmse_history[-1]}\n"
     )

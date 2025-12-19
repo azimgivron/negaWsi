@@ -57,7 +57,7 @@ class EarlyStopping:
             bool: True if early stopping condition is met (i.e., no improvement observed
                   within 'patience' iterations), False otherwise.
         """
-        if loss < self.best_loss and not np.isclose(loss, self.best_loss, atol=1e-4):
+        if loss < self.best_loss and not np.isclose(loss, self.best_loss, atol=1e-3):
             self.best_loss = loss
             self.since_improved = 0
             # Store copies of the weights at the best observed loss

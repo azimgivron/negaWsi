@@ -41,7 +41,6 @@ class NegaBase(metaclass=abc.ABCMeta):
         rho_increase (float): Factor used to dynamically increase the optimization step size.
         rho_decrease (float): Factor used to dynamically decrease the optimization step size.
         tau (float):
-        threshold (int): Maximum iterations allowed for the inner optimization loop.
         h1 (np.ndarray): Left factor matrix in the low-rank approximation.
         h2 (np.ndarray): Right factor matrix in the low-rank approximation.
         logger (logging.Logger): Logger instance for debugging and monitoring training progress.
@@ -68,7 +67,6 @@ class NegaBase(metaclass=abc.ABCMeta):
         smoothness_parameter: float,
         rho_increase: float,
         rho_decrease: float,
-        threshold: int,
         tau: float = None,
         seed: int = 123,
         flip_labels: FlipLabels = None,
@@ -97,7 +95,6 @@ class NegaBase(metaclass=abc.ABCMeta):
             rho_decrease (float): Multiplicative factor to dynamically decrease the optimization
                 step size.
             tau (float):
-            threshold (int): Maximum number of iterations for the inner optimization loop.
             seed (int, optional): Seed for reproducible random initialization. Defaults to 123.
             flip_labels (FlipLabels, optional): Object that simulates label noise by randomly
                 flipping a fraction of positive (1) entries to negatives (0) in the training mask.
@@ -115,7 +112,6 @@ class NegaBase(metaclass=abc.ABCMeta):
         self.smoothness_parameter = smoothness_parameter
         self.rho_increase = rho_increase
         self.rho_decrease = rho_decrease
-        self.threshold = threshold
         self.h1 = None
         self.h2 = None
         self.flip_labels = flip_labels
@@ -517,12 +513,6 @@ class NegaBase(metaclass=abc.ABCMeta):
                             left,
                             right
                 )
-                if not non_euclidean_descent_lemma_cond and inner_loop_it == self.threshold:
-                    self.logger.warning(
-                            "[Max. Iter.] Stopping inner loop. Training interrupted.",
-                    )
-                    res_norm_next_it = np.nan
-                    break
             # Break if loss becomes NaN
             if np.isnan(res_norm_next_it):
                 self.logger.warning(

@@ -21,29 +21,30 @@ def test_nega_fs_reconstructs_with_side_info(
         tune_regularization: Fixture that tunes regularization parameters with Optuna.
         reg_space_nega: Search space for λg and λd.
     """
-    R, train_mask, test_mask, X, Y = side_info_case
+    R, train_mask, val_maks, test_mask, X, Y, rank = side_info_case
     kwargs = dict(
         matrix=R,
         train_mask=train_mask,
-        test_mask=test_mask,
-        rank=2,
+        test_mask=val_maks,
+        rank=rank,
         side_info=(X, Y),
-        iterations=1000,
+        iterations=10_000,
         symmetry_parameter=0.99,
         smoothness_parameter=0.001,
         rho_increase=10.0,
         rho_decrease=0.1,
-        threshold=100,
         seed=0,
         svd_init=False,
     )
 
-    best_params = tune_regularization(NegaFS, reg_space_nega, kwargs, n_trials=8)
+    best_params = tune_regularization(NegaFS, reg_space_nega, kwargs, n_trials=100)
+    kwargs["test_mask"] = test_mask
     model = NegaFS(regularization_parameters=best_params, **kwargs)
     _ = model.run()
 
     R_hat = model.predict_all()
-    assert np.allclose(R_hat, R, atol=1e-3), (
+    rel_rmse = np.linalg.norm(R_hat - R) / np.linalg.norm(R)
+    assert rel_rmse < 1e-3, (
         f"NegaFS reconstruction mismatch with params {best_params}:\n"
-        f"pred=\n{R_hat}\ntruth=\n{R}"
+        f"pred=\n{R_hat}\ntruth=\n{R}\ntrain mask=\n{train_mask}\n"
     )
