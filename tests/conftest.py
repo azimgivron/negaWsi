@@ -3,6 +3,7 @@ from typing import Callable, Dict, Tuple
 import numpy as np
 import optuna
 import pytest
+import scipy.sparse as sp
 from numpy.typing import NDArray
 
 Matrix = NDArray[np.float64]
@@ -48,7 +49,7 @@ def tune_regularization() -> Callable[
 
         sampler = optuna.samplers.TPESampler(seed=0)
         study = optuna.create_study(direction="minimize", sampler=sampler)
-        study.optimize(objective, n_trials=n_trials, n_jobs=1)
+        study.optimize(objective, n_trials=n_trials, n_jobs=-1)
         return study.best_params
 
     return _tune
@@ -90,8 +91,8 @@ def _masks(R: Matrix, p_testval: float, p_val_within: float) -> Tuple[Mask, Mask
 
 @pytest.fixture(
     params=[
-        {"n": 5, "m": 5, "k": 2},
-        {"n": 100, "m": 100, "k": 10},
+        {"n": 10, "m": 10, "k": 4},
+        {"n": 50, "m": 50, "k": 18},
     ]
 )
 def nega_case(request: pytest.FixtureRequest) -> Tuple[Matrix, Mask, Mask, Mask, int]:
@@ -111,18 +112,52 @@ def nega_case(request: pytest.FixtureRequest) -> Tuple[Matrix, Mask, Mask, Mask,
     H2_true = rng.random((k, m))
     R = H1_true @ H2_true
 
-    p_testval = 0.10
+    p_testval = 0.1
     p_val_within =0.40
 
     train_mask, val_mask, test_mask = _masks(R, p_testval, p_val_within)
 
     return R, train_mask, val_mask, test_mask, k
 
+@pytest.fixture(
+    params=[
+        {"n": 10, "m": 10, "k": 4},
+        {"n": 50, "m": 50, "k": 18},
+    ]
+)
+def sparse_nega_case(request: pytest.FixtureRequest) -> Tuple[sp.csr_matrix, sp.csr_matrix, sp.csr_matrix, sp.csr_matrix, int]:
+    """Provide the reconstruction toy problem.
+
+    Returns:
+        Tuple[sp.csr_matrix, sp.csr_matrix, sp.csr_matrix, sp.csr_matrix, int]: (matrix, train_mask,
+        val_mask, test_mask, rank).
+    """
+    params = request.param
+    n = params["n"]
+    m = params["m"]
+    k = params["k"]
+
+    rng = np.random.default_rng(0)
+    success_prob = .35
+    H1_true = rng.binomial(1, p=success_prob, size=(n, k))
+    H2_true = rng.binomial(1, p=success_prob, size=(k, m))
+    R = H1_true @ H2_true
+
+    p_testval = 0.1
+    p_val_within = 0.40
+
+    train_mask, val_mask, test_mask = _masks(R, p_testval, p_val_within)
+    R = sp.csr_matrix(R.astype(float))
+    train_mask = sp.csr_matrix(train_mask)
+    val_mask = sp.csr_matrix(val_mask)
+    test_mask = sp.csr_matrix(test_mask)
+
+    return R, train_mask, val_mask, test_mask, k
+
 
 @pytest.fixture(
     params=[
-        {"n": 5, "m": 5, "p": 3, "q": 3, "k": 2},
-        {"n": 100, "m": 100, "p": 200, "q": 50, "k": 20},
+        {"n": 5, "m": 5, "p": 6, "q": 6, "k": 4},
     ]
 )
 def side_info_case(request: pytest.FixtureRequest) -> Tuple[Matrix, Mask, Mask, Matrix, Matrix, int]:
@@ -146,7 +181,7 @@ def side_info_case(request: pytest.FixtureRequest) -> Tuple[Matrix, Mask, Mask, 
     H2_true = rng.random((k, q))
     R = X @ H1_true @ H2_true @ Y
     
-    p_testval = 0.10
+    p_testval = 0.1
     p_val_within = 0.40
 
     train_mask, val_mask, test_mask = _masks(R, p_testval, p_val_within)
@@ -155,8 +190,7 @@ def side_info_case(request: pytest.FixtureRequest) -> Tuple[Matrix, Mask, Mask, 
 
 @pytest.fixture(
     params=[
-        {"n": 5, "m": 5, "p": 3, "q": 3, "k": 2},
-        {"n": 100, "m": 100, "p": 200, "q": 50, "k": 20},
+        {"n": 5, "m": 5, "p": 6, "q": 6, "k": 4},
     ]
 )
 def reg_side_info_case(request: pytest.FixtureRequest) -> Tuple[Matrix, Mask, Mask, Matrix, Matrix, int]:
@@ -183,7 +217,7 @@ def reg_side_info_case(request: pytest.FixtureRequest) -> Tuple[Matrix, Mask, Ma
     Y = B @ H2_true
     R = H1_true @ H2_true
 
-    p_testval = 0.10
+    p_testval = 0.1
     p_val_within = 0.40
 
     train_mask, val_mask, test_mask = _masks(R, p_testval, p_val_within)

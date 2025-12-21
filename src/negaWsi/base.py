@@ -296,6 +296,9 @@ class NegaBase(metaclass=abc.ABCMeta):
         """
         Computes the Root Mean Square Error (RMSE).
 
+        Args:
+            mask (np.ndarray): The mask to apply.
+
         Returns:
             float: The computed RMSE value, representing the prediction error
                    on the observed entries.
