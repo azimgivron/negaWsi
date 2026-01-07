@@ -35,6 +35,7 @@ class State:
     grad_f_W_k: np.ndarray = None
     loss_W_k: float = None
     loss_W_k_next: float = None
+    step_size: float = None
 
     def update(self):
         """Advance the state to the next iterate."""
@@ -174,9 +175,12 @@ class NegaBase(metaclass=abc.ABCMeta):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def calculate_loss(self) -> float:
+    def calculate_loss(self, mask: np.ndarray) -> float:
         """
         Computes the loss function value for the training data.
+
+        Args:
+            mask (np.ndarray): The binary mask.
 
         Returns:
             float: The computed loss value.
@@ -282,16 +286,19 @@ class NegaBase(metaclass=abc.ABCMeta):
         ), f"Bregman distance must always be positive: D_h = {dist:.4e}"
         return dist
 
-    def calculate_training_residual(self) -> np.ndarray:
+    def calculate_residual(self, mask: np.ndarray = None) -> np.ndarray:
         """
-        Compute the training residual from the input matrix M (m x n), the model's prediction
-        M_pred and the binary training mask. Optionally, if positive_flip_fraction is set and
+        Compute the residual from the input matrix M (m x n), the model's prediction
+        M_pred and the binary mask. Optionally, if positive_flip_fraction is set and
         positive_flip_fraction = d, a fraction 'd' of the positive entries (ones) in M
         (where P is 1) is flipped to 0, yielding a modified label matrix L. Otherwise, L = M.
 
-        The training residual R is computed as:
+        The residual R is computed as:
             R = B ⊙ (M_pred - M)
         where ⊙ represents hadamard product.
+
+        Args:
+            mask (np.ndarray): The binary mask.
 
         Returns:
             np.ndarray: The residual matrix R (n x m).
@@ -301,7 +308,8 @@ class NegaBase(metaclass=abc.ABCMeta):
         else:
             labels = self.matrix
         residual = self.predict_all() - labels
-        residual[~self.train_mask] = 0
+        mask = mask if mask is not None else self.train_mask
+        residual[~mask] = 0
         return residual
 
     def calculate_rmse(self, mask: np.ndarray) -> float:
@@ -382,7 +390,7 @@ class NegaBase(metaclass=abc.ABCMeta):
         t_k = self.cardano(delta)
         state.W_k_next = (1 / t_k) * step
         self.set_weights(state.W_k_next)
-        state.loss_W_k_next = self.calculate_loss()
+        state.loss_W_k_next = self.calculate_loss(self.train_mask)
 
     def non_euclidean_descent_lemma_cond(self, state: State):
         """Check the non-Euclidean descent lemma condition.
@@ -483,7 +491,8 @@ class NegaBase(metaclass=abc.ABCMeta):
         Returns:
             Result: A dataclass containing:
                 - completed_matrix: The reconstructed matrix (low-rank approximation).
-                - loss_history: List of loss values at each iteration.
+                - training_loss_history: List of training loss values at each iteration.
+                - test_loss_history: List of test loss values at each iteration.
                 - rmse_history: List of RMSE values at each iteration.
                 - runtime: Total runtime of the optimization process.
                 - iterations: Total number of iterations performed.
@@ -499,10 +508,10 @@ class NegaBase(metaclass=abc.ABCMeta):
             "Starting optimization with tau=%f, step_size=%f", self.tau, state.step_size
         )
         # Initialize loss and RMSE history
-        state.loss_W_k = self.calculate_loss()
-        testing_loss = self.calculate_rmse(self.test_mask)
-        loss = [state.loss_W_k]
-        rmse = [testing_loss]
+        state.loss_W_k = self.calculate_loss(self.train_mask)
+        training_loss = [state.loss_W_k]
+        test_loss = [self.calculate_loss(self.test_mask)]
+        rmse = [self.calculate_rmse(self.test_mask)]
 
         # Main optimization loop
         for ith_iteration in range(self.iterations):
@@ -513,7 +522,7 @@ class NegaBase(metaclass=abc.ABCMeta):
                 ),
                 ith_iteration,
                 rmse[-1],
-                loss[-1],
+                training_loss[-1],
             )
             # compute gradients and update W
             self.update_grad_f_W(state)
@@ -524,7 +533,7 @@ class NegaBase(metaclass=abc.ABCMeta):
                 self.callback(
                     ith_iteration,
                     state.loss_W_k_next,
-                    testing_loss,
+                    rmse[-1],
                     state.grad_f_W_k,
                     state.step_size,
                 )
@@ -540,12 +549,12 @@ class NegaBase(metaclass=abc.ABCMeta):
 
             # Update variables for the next iteration
             state.update()
-            testing_loss = self.calculate_rmse(self.test_mask)
-            loss.append(state.loss_W_k)
-            rmse.append(testing_loss)
+            training_loss.append(state.loss_W_k)
+            test_loss.append(self.calculate_loss(self.test_mask))
+            rmse.append(self.calculate_rmse(self.test_mask))
 
             if self.early_stopping is not None and self.early_stopping(
-                testing_loss, state.W_k
+                rmse[-1], state.W_k
             ):
                 self.set_weights(self.early_stopping.best_weights)
                 self.logger.debug("[Early Stopping] Training interrupted.")
@@ -553,7 +562,7 @@ class NegaBase(metaclass=abc.ABCMeta):
                     self.callback(
                         ith_iteration,
                         state.loss_W_k_next,
-                        testing_loss,
+                        rmse[-1],
                         state.grad_f_W_k,
                         state.step_size,
                     )
@@ -565,9 +574,10 @@ class NegaBase(metaclass=abc.ABCMeta):
             "[Completion] Optimization finished in %.2f seconds.", runtime
         )
         training_data = Result(
-            loss_history=loss,
+            training_loss_history=training_loss,
+            test_loss_history=test_loss,
             iterations=ith_iteration,
-            rmse_history=rmse,
+            test_rmse_history=rmse,
             runtime=runtime,
         )
         return training_data

@@ -5,9 +5,12 @@ Alternating Least Squares Descent Algorithm for Matrix Completion
 
 This module implements the template for Alternating Least Squares Algorithm.
 """
-import numpy as np
 from typing import Dict, List
+
+import numpy as np
+
 from negaWsi.alternating_methods.standard.base import McSolver
+
 
 class ALSQ(McSolver):
     """
@@ -16,10 +19,7 @@ class ALSQ(McSolver):
     This solver alternates between optimizing the left and right factor matrices.
     """
 
-    def __init__(
-        self,
-        **kwargs
-    ):
+    def __init__(self, **kwargs):
         """
         Initializes the solver with parameters forwarded to `McSolver`.
 
@@ -47,12 +47,16 @@ class ALSQ(McSolver):
         # --- Update H1 row-wise ---
         for i in range(m):
             idx = self.obs_cols_by_row[i]
-            A = self.h2[:, idx] @ self.h2[:, idx].T + self.regularization_parameters["λg"] * I
+            A = (
+                self.h2[:, idx] @ self.h2[:, idx].T
+                + self.regularization_parameters["λg"] * I
+            )
             b = self.h2[:, idx] @ self.matrix[i, idx]
             self.h1[i, :] = np.linalg.solve(A, b)
-        _, test_loss, training_loss = self.evaluate()
-        loss["test"].append(test_loss)
-        loss["training"].append(training_loss)
+        _, test_loss_step, rmse_step, training_loss_step = self.evaluate()
+        loss["test"].append(test_loss_step)
+        loss["rmse"].append(rmse_step)
+        loss["training"].append(training_loss_step)
         self.logger.debug(
             ("[ALS Step h1] Loss: %.6e"),
             loss["training"][-1],
@@ -61,12 +65,16 @@ class ALSQ(McSolver):
         # ---  Update H2 column-wise ---
         for j in range(n):
             idx = self.obs_rows_by_col[j]
-            A = self.h1[idx, :].T @ self.h1[idx, :] + self.regularization_parameters["λd"] * I
+            A = (
+                self.h1[idx, :].T @ self.h1[idx, :]
+                + self.regularization_parameters["λd"] * I
+            )
             b = self.h1[idx, :].T @ self.matrix[idx, j]
             self.h2[:, j] = np.linalg.solve(A, b)
-        _, test_loss, training_loss = self.evaluate()
-        loss["test"].append(test_loss)
-        loss["training"].append(training_loss)
+        _, test_loss_step, rmse_step, training_loss_step = self.evaluate()
+        loss["test"].append(test_loss_step)
+        loss["rmse"].append(rmse_step)
+        loss["training"].append(training_loss_step)
         self.logger.debug(
             ("[ALS Step h2] Loss: %.6e"),
             loss["training"][-1],

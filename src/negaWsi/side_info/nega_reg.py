@@ -133,7 +133,7 @@ class NegaReg(NegaBase):
         ]
         self.beta_d = weight_matrix[(nb_genes + nb_diseases + gene_feat_dim) :, :]
 
-    def calculate_loss(self) -> float:
+    def calculate_loss(self, mask: np.ndarray) -> float:
         """
         Computes the loss function value for the training data.
 
@@ -145,10 +145,13 @@ class NegaReg(NegaBase):
             + 0.5 * λ_βg * || β_G ||_F^2
             + 0.5 * λ_βd * || β_D ||_F^2
 
+        Args:
+            mask (np.ndarray): The binary mask.
+
         Returns:
             float: The computed loss value.
         """
-        residuals = self.calculate_training_residual()
+        residuals = self.calculate_residual(mask)
         self.loss_terms["|| B ⊙ (h1 @ h2 - M) ||_F"] = np.linalg.norm(
             residuals, ord="fro"
         )
@@ -209,7 +212,7 @@ class NegaReg(NegaBase):
             np.ndarray: The gradient of the latents ((m+n+g+d) x rank)
         """
         residuals = (
-            self.calculate_training_residual()
+            self.calculate_residual()
         )  # B ⊙ (h1 @ h2 - M) shape (nb_genes, nb_diseases)
 
         gene_prediction = self.gene_side_info @ self.beta_g  # G @ β_G (nb_genes, k)

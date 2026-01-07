@@ -153,7 +153,7 @@ class NegaBase(nb.NegaBase):
             np.ndarray: The prediction ij.
         """
 
-    def calculate_training_residual_entries(self) -> np.ndarray:
+    def calculate_residual_entries(self) -> np.ndarray:
         """
         Compute the training residual from the input matrix M (m x n), the model's prediction
         M_pred and the binary training mask.

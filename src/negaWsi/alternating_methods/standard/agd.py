@@ -6,10 +6,13 @@ Alternating Gradient Descent Algorithm for Matrix Completion
 This module implements the template for Alternating Gradient Descent Algorithm.
 """
 
-import numpy as np
 from typing import Dict, List
+
+import numpy as np
 from scipy.optimize import line_search
+
 from negaWsi.alternating_methods.standard.base import McSolver
+
 
 class AGD(McSolver):
     """
@@ -19,10 +22,7 @@ class AGD(McSolver):
     using gradient descent steps.
     """
 
-    def __init__(
-        self,
-        **kwargs
-    ):
+    def __init__(self, **kwargs):
         """
         Initializes the solver with parameters forwarded to `McSolver`.
 
@@ -42,14 +42,11 @@ class AGD(McSolver):
         Returns:
             np.ndarray: Stacked weight matrix with shape (n + m, rank).
         """
-        armijo_c = 1e-4
-        curvature_c = 0.9
-
         def line_search_update(step_fn, x_flat):
             loss_val, grad = step_fn(x_flat, loss)
             direction = -grad
-            f = lambda x: step_fn(x)[0]
-            grad_f = lambda x: step_fn(x)[1]
+            f = lambda x: step_fn(x, loss)[0]
+            grad_f = lambda x: step_fn(x, loss)[1]
             alpha, *_ = line_search(
                 f,
                 grad_f,
@@ -57,12 +54,11 @@ class AGD(McSolver):
                 direction,
                 gfk=grad,
                 old_fval=loss_val,
-                c1=armijo_c,
-                c2=curvature_c,
-                maxiter=self.max_inner_iter
             )
+            if alpha is None:
+                alpha = 1e-4
             return x_flat + alpha * direction
-            
+
         h1_flat = self.h1.ravel()
         h1_flat = line_search_update(self.h1_step, h1_flat)
         self.h1 = h1_flat.reshape(self.h1.shape)

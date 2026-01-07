@@ -16,9 +16,11 @@ class Result:
     Stores the results of the matrix completion process.
 
     Attributes:
-        loss_history (List[float]):
-            A list of loss values recorded at each iteration of the training process.
-        rmse_history (List[float]):
+        training_loss_history (List[float]):
+            A list of training loss values recorded at each iteration of the training process.
+        test_loss_history (List[float]):
+            A list of test loss values recorded at each iteration of the training process.
+        test_rmse_history (List[float]):
             A list of RMSE (Root Mean Squared Error) values recorded during each
             iteration on the test set to monitor performance.
         runtime (float):
@@ -27,7 +29,8 @@ class Result:
             The total number of iterations performed during the optimization process.
     """
 
-    loss_history: List[float]
-    rmse_history: List[float]
+    training_loss_history: List[float]
+    test_loss_history: List[float]
+    test_rmse_history: List[float]
     runtime: float
     iterations: int

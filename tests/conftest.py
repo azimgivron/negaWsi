@@ -46,7 +46,7 @@ def tune_regularization() -> (
             }
             model = model_cls(regularization_parameters=reg, **kwargs)
             training_status = model.run()
-            return training_status.rmse_history[-1]
+            return training_status.test_rmse_history[-1]
 
         sampler = optuna.samplers.TPESampler(seed=0)
         study = optuna.create_study(direction="minimize", sampler=sampler)
