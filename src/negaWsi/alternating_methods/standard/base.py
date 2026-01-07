@@ -147,8 +147,8 @@ class McSolver(metaclass=abc.ABCMeta):
                 - rmse: Root Mean Square Error on the test mask.
                 - training_loss: Regularized loss computed on the training mask.
         """
-        residuals = self.calculate_residual(self.train_mask)
-        data_loss = 0.5 * np.linalg.norm(residuals, ord="fro") ** 2
+        training_residuals = self.calculate_residual(self.train_mask)
+        training_loss = 0.5 * np.linalg.norm(training_residuals, ord="fro") ** 2
         loss_reg_h1 = (
             0.5
             * self.regularization_parameters["λg"]
@@ -159,12 +159,13 @@ class McSolver(metaclass=abc.ABCMeta):
             * self.regularization_parameters["λd"]
             * np.linalg.norm(self.h2, ord="fro")
         )
-        training_loss = data_loss + loss_reg_h1 + loss_reg_h2
-        residuals = self.calculate_residual(self.test_mask)
-        data_loss = 0.5 * np.linalg.norm(residuals, ord="fro") ** 2
-        test_loss = data_loss + loss_reg_h1 + loss_reg_h2
+        training_loss += loss_reg_h1 + loss_reg_h2
+        test_residuals = self.calculate_residual(self.test_mask)
+        test_loss = 0.5 * np.linalg.norm(test_residuals, ord="fro") ** 2
+        test_loss += loss_reg_h1 + loss_reg_h2
+        
         rmse = self.calculate_rmse(self.test_mask)
-        return residuals, test_loss, rmse, training_loss
+        return training_residuals, test_loss, rmse, training_loss
 
     def h1_step(
         self, h1_flat: np.ndarray, loss: Dict[str, List[float]]
