@@ -67,7 +67,7 @@ class ENegaFS(NegaFS):
         G = self.gene_side_info.T @ (self.laplacian @ self.gene_latent)
         return np.sum(self.h1 * G)
 
-    def calculate_loss(self) -> float:
+    def calculate_loss(self, mask: np.ndarray) -> float:
         """
         Computes the loss function value for the training data.
 
@@ -78,10 +78,13 @@ class ENegaFS(NegaFS):
             + 0.5 * λd * || h2 ||_F^2
             + 0.5 * λG * Tr(h1.T @ X.T @ L @ X @ h1)
 
+        Args:
+            mask (np.ndarray): The binary mask.
+
         Returns:
             float: The computed loss value.
         """
-        residuals = self.calculate_training_residual()
+        residuals = self.calculate_residual(mask)
         self.loss_terms["|| B ⊙ (X @ h1 @ h2 @ Y.T - M) ||_F"] = np.linalg.norm(
             residuals, ord="fro"
         )
@@ -112,7 +115,7 @@ class ENegaFS(NegaFS):
         Returns:
             np.ndarray: The gradient of the latents ((g+d) x rank)
         """
-        residuals = self.calculate_training_residual()
+        residuals = self.calculate_residual()
         grad_h1 = (
             self.gene_side_info.T @ (residuals @ self.disease_latent.T)
             + self.regularization_parameters["λg"] * self.h1

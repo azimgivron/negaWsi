@@ -5,11 +5,13 @@ Alternating Minimize Descent Algorithm for Matrix Completion
 
 This module implements the template for Alternating Minimize Descent Algorithm.
 """
-from scipy.optimize import minimize
+from typing import Dict, List
 
 import numpy as np
-from typing import Dict, List
+from scipy.optimize import minimize
+
 from negaWsi.alternating_methods.standard.base import McSolver
+
 
 class AMD(McSolver):
     """
@@ -18,11 +20,7 @@ class AMD(McSolver):
     This solver alternates between optimizing the left and right factor matrices.
     """
 
-    def __init__(
-        self,
-        method: str,
-        **kwargs
-    ):
+    def __init__(self, method: str, **kwargs):
         """
         Initializes the solver with parameters forwarded to `McSolver`.
 

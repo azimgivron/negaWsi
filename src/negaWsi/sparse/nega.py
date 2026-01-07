@@ -66,7 +66,7 @@ class Nega(NegaBase):
         Returns:
             float: The computed loss value.
         """
-        residuals = self.calculate_training_residual_entries()
+        residuals = self.calculate_residual_entries()
         self.loss_terms["|| B ⊙ (h1 @ h2 - M) ||_F"] = np.linalg.norm(residuals)
         self.loss_terms["|| h1 ||_F"] = np.linalg.norm(self.h1, ord="fro")
         self.loss_terms["|| h2 ||_F"] = np.linalg.norm(self.h2, ord="fro")
@@ -120,7 +120,7 @@ class Nega(NegaBase):
         Returns:
             np.ndarray: The gradient of the latents ((n+m) x rank)
         """
-        residuals = self.calculate_training_residual_entries()
+        residuals = self.calculate_residual_entries()
 
         grad_h1 = np.zeros_like(self.h1)
         grad_h2 = np.zeros_like(self.h2)

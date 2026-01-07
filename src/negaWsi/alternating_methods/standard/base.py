@@ -8,13 +8,14 @@ This module implements the template for Alternating Gradient Descent Algorithm.
 import abc
 import logging
 import time
-from typing import Dict, Tuple, List
 from collections import defaultdict
+from typing import Dict, List, Tuple
 
 import numpy as np
 
 from negaWsi.utils.early_stopping import EarlyStopping
 from negaWsi.utils.result import Result
+
 
 class McSolver(metaclass=abc.ABCMeta):
     """
@@ -23,7 +24,7 @@ class McSolver(metaclass=abc.ABCMeta):
     The class is designed for scenarios where the objective is to approximate a
     partially observed matrix by a low-rank factorization. The problem is of
     the form
-    
+
     Minimizes:
             0.5 ||M - h1 @ h2||_F^2 + 0.5 λg ||h1||_F^2 + 0.5 λd ||h2||_F^2
 
@@ -57,7 +58,7 @@ class McSolver(metaclass=abc.ABCMeta):
         iterations: int,
         seed: int = 123,
         early_stopping: EarlyStopping = None,
-        max_inner_iter: int = 100
+        max_inner_iter: int = 100,
     ):
         """
         Initializes the AGD instance with the provided configuration
@@ -132,9 +133,22 @@ class McSolver(metaclass=abc.ABCMeta):
         """
         return self.gene_latent @ self.disease_latent
 
-    def evaluate(self) -> Tuple[float, float, float]:
-        residuals = self.calculate_training_residual()
-        data_loss = 0.5 * np.linalg.norm(residuals, ord="fro") ** 2
+    def evaluate(self) -> Tuple[np.ndarray, float, float, float]:
+        """
+        Evaluate model performance on training and test masks.
+
+        Computes the residuals on the training mask, the regularized training
+        loss, the regularized test loss, and the RMSE on the test mask.
+
+        Returns:
+            Tuple[np.ndarray, float, float, float]: A 4-tuple containing:
+                - residuals: Residual matrix on the training mask (n x m).
+                - test_loss: Regularized loss computed on the test mask.
+                - rmse: Root Mean Square Error on the test mask.
+                - training_loss: Regularized loss computed on the training mask.
+        """
+        training_residuals = self.calculate_residual(self.train_mask)
+        training_loss = 0.5 * np.linalg.norm(training_residuals, ord="fro") ** 2
         loss_reg_h1 = (
             0.5
             * self.regularization_parameters["λg"]
@@ -145,11 +159,17 @@ class McSolver(metaclass=abc.ABCMeta):
             * self.regularization_parameters["λd"]
             * np.linalg.norm(self.h2, ord="fro")
         )
-        test_loss = self.calculate_rmse(self.test_mask)
-        training_loss = data_loss + loss_reg_h1 + loss_reg_h2
-        return residuals, test_loss, training_loss
+        training_loss += loss_reg_h1 + loss_reg_h2
+        test_residuals = self.calculate_residual(self.test_mask)
+        test_loss = 0.5 * np.linalg.norm(test_residuals, ord="fro") ** 2
+        test_loss += loss_reg_h1 + loss_reg_h2
+        
+        rmse = self.calculate_rmse(self.test_mask)
+        return training_residuals, test_loss, rmse, training_loss
 
-    def h1_step(self, h1_flat: np.ndarray, loss: Dict[str, List[float]] = defaultdict(list)) -> Tuple[float, np.ndarray]:
+    def h1_step(
+        self, h1_flat: np.ndarray, loss: Dict[str, List[float]]
+    ) -> Tuple[float, np.ndarray]:
         """
         Compute objective and gradient for h1.
 
@@ -161,9 +181,10 @@ class McSolver(metaclass=abc.ABCMeta):
             Tuple[float, np.ndarray]: The scalar loss and the flattened gradient for h1.
         """
         self.h1 = h1_flat.reshape(self.h1.shape)
-        residuals, test_loss, training_loss = self.evaluate()
-        loss["test"].append(test_loss)
-        loss["training"].append(training_loss)
+        residuals, test_loss_step, rmse_step, training_loss_step = self.evaluate()
+        loss["test"].append(test_loss_step)
+        loss["rmse"].append(rmse_step)
+        loss["training"].append(training_loss_step)
         self.logger.debug(
             ("[Euclidean Gradient Step h1] Loss: %.6e"),
             loss["training"][-1],
@@ -174,7 +195,9 @@ class McSolver(metaclass=abc.ABCMeta):
         )
         return loss["training"][-1], grad_h1.ravel()
 
-    def h2_step(self, h2_flat: np.ndarray, loss: Dict[str, List[float]] = defaultdict(list)) -> Tuple[float, np.ndarray]:
+    def h2_step(
+        self, h2_flat: np.ndarray, loss: Dict[str, List[float]]
+    ) -> Tuple[float, np.ndarray]:
         """
         Compute objective and gradient for h2.
 
@@ -186,15 +209,16 @@ class McSolver(metaclass=abc.ABCMeta):
             Tuple[float, np.ndarray]: The scalar loss and the flattened gradient for h2.
         """
         self.h2 = h2_flat.reshape(self.h2.shape)
-        residuals, test_loss, training_loss = self.evaluate()
-        loss["test"].append(test_loss)
-        loss["training"].append(training_loss)
+        residuals, test_loss_step, rmse_step, training_loss_step = self.evaluate()
+        loss["rmse"].append(rmse_step)
+        loss["test"].append(test_loss_step)
+        loss["training"].append(training_loss_step)
         self.logger.debug(
             ("[Euclidean Gradient Step h2] Loss: %.6e"),
             loss["training"][-1],
         )
         grad_h2 = (
-            self.gene_latent.T @ residuals 
+            self.gene_latent.T @ residuals
             + self.regularization_parameters["λd"] * self.h2
         )
         return loss["training"][-1], grad_h2.ravel()
@@ -217,17 +241,20 @@ class McSolver(metaclass=abc.ABCMeta):
         """
         return self.h2
 
-    def calculate_training_residual(self) -> np.ndarray:
+    def calculate_residual(self, mask: np.ndarray = None) -> np.ndarray:
         """
         The training residual R is computed as:
             R = B ⊙ (M_pred - M)
         where ⊙ represents hadamard product.
 
+        Args:
+            mask (np.ndarray): The binary mask.
+
         Returns:
             np.ndarray: The residual matrix R (n x m).
         """
         residual = self.predict_all() - self.matrix
-        residual[~self.train_mask] = 0
+        residual[~mask] = 0
         return residual
 
     def calculate_rmse(self, mask: np.ndarray) -> float:
@@ -275,7 +302,8 @@ class McSolver(metaclass=abc.ABCMeta):
         Returns:
             Result: A dataclass containing:
                 - completed_matrix: The reconstructed matrix (low-rank approximation).
-                - loss_history: List of loss values at each iteration.
+                - training_loss_history: List of training loss values at each iteration.
+                - test_loss_history: List of test loss values at each iteration.
                 - rmse_history: List of RMSE values at each iteration.
                 - runtime: Total runtime of the optimization process.
                 - iterations: Total number of iterations performed.
@@ -284,9 +312,10 @@ class McSolver(metaclass=abc.ABCMeta):
         start_time = time.time()
 
         self.logger.debug("Starting optimization")
-        _, test_loss, training_loss = self.evaluate()
-        rmse_history = [test_loss]
-        loss_history = [training_loss]
+        _, test_loss_step, rmse_step, training_loss_step = self.evaluate()
+        rmse = [rmse_step]
+        training_loss = [training_loss_step]
+        test_loss = [test_loss_step]
         loss = defaultdict(list)
 
         # Main optimization loop
@@ -299,11 +328,11 @@ class McSolver(metaclass=abc.ABCMeta):
                     " RMSE=%.6e (testing), Mean Loss=%.6e (training)"
                 ),
                 ith_iteration,
-                loss["test"][-1],
+                loss["rmse"][-1],
                 loss["training"][-1],
             )
             if self.early_stopping is not None and self.early_stopping(
-                loss["test"][-1], W_k
+                loss["rmse"][-1], W_k
             ):
                 weight_matrix = self.early_stopping.best_weights
                 gene_feat_dim = self.h1.shape[0]
@@ -312,20 +341,14 @@ class McSolver(metaclass=abc.ABCMeta):
                 self.logger.debug("[Early Stopping] Training interrupted.")
                 break
             if (ith_iteration + 1) % log_freq == 0 or ith_iteration == 0:
-                self.callback(
-                    ith_iteration,
-                    loss["training"],
-                    loss["test"]
-                )
-                rmse_history.append(loss["test"][-1])
-                loss_history.append(loss["training"][-1])
-                loss["test"].clear()
+                self.callback(ith_iteration, loss["training"], loss["rmse"])
+                rmse.append(loss["rmse"][-1])
+                training_loss.append(loss["training"][-1])
+                test_loss.append(loss["test"][-1])
+                loss["rmse"].clear()
                 loss["training"].clear()
-        self.callback(
-                    ith_iteration,
-                    loss["training"],
-                    loss["test"]
-                )
+                loss["test"].clear()
+        self.callback(ith_iteration, loss["training"], loss["rmse"])
 
         # Compute runtime
         runtime = time.time() - start_time
@@ -333,9 +356,10 @@ class McSolver(metaclass=abc.ABCMeta):
             "[Completion] Optimization finished in %.2f seconds.", runtime
         )
         training_data = Result(
-            loss_history=loss_history,
+            training_loss_history=training_loss,
+            test_loss_history=test_loss,
             iterations=self.ith_iteration,
-            rmse_history=rmse_history,
+            test_rmse_history=rmse,
             runtime=runtime,
         )
         return training_data
