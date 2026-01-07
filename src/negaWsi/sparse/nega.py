@@ -9,7 +9,7 @@ import numpy as np
 import scipy.sparse as sp
 
 from negaWsi.sparse.base import NegaBase
-from negaWsi.utils import svd
+from negaWsi.utils.utils import svd
 
 
 class Nega(NegaBase):
@@ -39,7 +39,9 @@ class Nega(NegaBase):
         """
         super().__init__(*args, **kwargs)
         if svd_init:
-            raise NotImplementedError("SVD initialization not implemented for sparse matrices.")
+            raise NotImplementedError(
+                "SVD initialization not implemented for sparse matrices."
+            )
         else:
             nb_genes, nb_diseases = self.matrix.shape
             self.h1 = np.random.randn(nb_genes, self.rank)
@@ -71,7 +73,7 @@ class Nega(NegaBase):
 
         loss = 0.5 * (
             self.loss_terms["|| B ⊙ (h1 @ h2 - M) ||_F"] ** 2
-            + self.regularization_parameters["λg"] * self.loss_terms["|| h1 ||_F"] ** 2 
+            + self.regularization_parameters["λg"] * self.loss_terms["|| h1 ||_F"] ** 2
             + self.regularization_parameters["λd"] * self.loss_terms["|| h2 ||_F"] ** 2
         )
         return loss
@@ -91,7 +93,7 @@ class Nega(NegaBase):
             np.ndarray: The reconstructed (completed) matrix.
         """
         return self.h1 @ self.h2
-    
+
     def predict_entries(self, i: np.ndarray, j: np.ndarray) -> np.ndarray:
         """Predict entry R_ij
 
@@ -104,7 +106,7 @@ class Nega(NegaBase):
         """
         return np.sum(self.h1[i, :] * self.h2[:, j].T, axis=1)
 
-    def compute_grad_f_W_k(self) -> np.ndarray:
+    def compute_grad_f_W(self) -> np.ndarray:
         """Compute the gradients for for each latent as:
 
         grad_f_W_k = (∇_h1, ∇_h2.T).T
@@ -125,9 +127,13 @@ class Nega(NegaBase):
 
         # Accumulate per-observation contributions
         # grad_h1[i_t, :] += residuals_t * h2[:, j_t]^T
-        np.add.at(grad_h1, self.train_i, residuals[:, None] * self.h2[:, self.train_j].T)
+        np.add.at(
+            grad_h1, self.train_i, residuals[:, None] * self.h2[:, self.train_j].T
+        )
         # grad_h2[:, j_t] += residuals_t * h1[i_t, :]^T
-        np.add.at(grad_h2.T, self.train_j, residuals[:, None] * self.h1[self.train_i, :])
+        np.add.at(
+            grad_h2.T, self.train_j, residuals[:, None] * self.h1[self.train_i, :]
+        )
 
         grad_h1 += self.regularization_parameters["λg"] * self.h1
         grad_h2 += self.regularization_parameters["λd"] * self.h2

@@ -6,17 +6,18 @@ with conjugate gradient method.
 
 This module implements IMC Algorithm.
 """
-from scipy.optimize import minimize
 import logging
 import time
-from typing import Tuple, Dict
 from collections import defaultdict
-import numpy as np
+from typing import Dict, Tuple
 
-from negaWsi.early_stopping import EarlyStopping
-from negaWsi.flip_labels import FlipLabels
-from negaWsi.result import Result
-from negaWsi.utils import svd
+import numpy as np
+from scipy.optimize import minimize
+
+from negaWsi.utils.early_stopping import EarlyStopping
+from negaWsi.utils.flip_labels import FlipLabels
+from negaWsi.utils.result import Result
+from negaWsi.utils.utils import svd
 
 
 class IMC:
@@ -162,7 +163,7 @@ class IMC:
             np.ndarray: The latent matrix. Shape is (k x n).
         """
         return self.gene_side_info @ self.h1
-    
+
     @property
     def disease_latent(self) -> np.ndarray:
         """Compute disease latent matrix
@@ -171,7 +172,6 @@ class IMC:
             np.ndarray: The latent matrix. Shape is (k x m).
         """
         return self.h2 @ self.disease_side_info.T
-
 
     def predict_all(self) -> np.ndarray:
         """
@@ -287,7 +287,11 @@ class IMC:
         self.h1 = h1_flat.reshape(self.h1.shape)
         residuals = self.calculate_training_residual()
         data_loss = 0.5 * np.linalg.norm(residuals, ord="fro") ** 2
-        loss_reg = 0.5 * self.regularization_parameters["λg"] * np.linalg.norm(self.h1, ord="fro")
+        loss_reg = (
+            0.5
+            * self.regularization_parameters["λg"]
+            * np.linalg.norm(self.h1, ord="fro")
+        )
         loss = data_loss + loss_reg
         grad_h1 = (
             self.gene_side_info.T @ (residuals @ self.disease_latent.T)
@@ -298,13 +302,17 @@ class IMC:
             loss,
         )
 
-        self.logs['test'].append(self.calculate_rmse(self.test_mask))
+        self.logs["test"].append(self.calculate_rmse(self.test_mask))
 
-        loss_reg2 = 0.5 * self.regularization_parameters["λd"] * np.linalg.norm(self.h2, ord="fro")
-        self.logs['training'].append(loss + loss_reg2)
+        loss_reg2 = (
+            0.5
+            * self.regularization_parameters["λd"]
+            * np.linalg.norm(self.h2, ord="fro")
+        )
+        self.logs["training"].append(loss + loss_reg2)
 
         return loss, grad_h1.ravel()
-    
+
     def objective_and_grad_h2(self, h2_flat: np.ndarray) -> Tuple[float, np.ndarray]:
         """
         Compute objective and gradient for h2.
@@ -322,21 +330,28 @@ class IMC:
         self.h2 = h2_flat.reshape(self.h2.shape)
         residuals = self.calculate_training_residual()
         data_loss = 0.5 * np.linalg.norm(residuals, ord="fro") ** 2
-        loss_reg = 0.5 * self.regularization_parameters["λd"] * np.linalg.norm(self.h2, ord="fro")
+        loss_reg = (
+            0.5
+            * self.regularization_parameters["λd"]
+            * np.linalg.norm(self.h2, ord="fro")
+        )
         loss = data_loss + loss_reg
         grad_h2 = (
-            (self.gene_latent.T @ residuals) @ self.disease_side_info
-            + self.regularization_parameters["λd"] * self.h2
-        )
+            self.gene_latent.T @ residuals
+        ) @ self.disease_side_info + self.regularization_parameters["λd"] * self.h2
         self.logger.debug(
             ("[Euclidean Gradient Step h2] Loss: %.6e"),
             loss,
         )
-        
-        self.logs['test'].append(self.calculate_rmse(self.test_mask))
 
-        loss_reg2 = 0.5 * self.regularization_parameters["λg"] * np.linalg.norm(self.h1, ord="fro")
-        self.logs['training'].append(loss + loss_reg2)
+        self.logs["test"].append(self.calculate_rmse(self.test_mask))
+
+        loss_reg2 = (
+            0.5
+            * self.regularization_parameters["λg"]
+            * np.linalg.norm(self.h1, ord="fro")
+        )
+        self.logs["training"].append(loss + loss_reg2)
 
         return loss, grad_h2.ravel()
 
@@ -359,9 +374,7 @@ class IMC:
         # Start measuring runtime
         start_time = time.time()
 
-        self.logger.debug(
-            "Starting optimization"
-        )
+        self.logger.debug("Starting optimization")
         rmse_history = []
         loss_history = []
 
@@ -378,18 +391,18 @@ class IMC:
             res_h1 = minimize(
                 fun=lambda h1_flat: self.objective_and_grad_h1(h1_flat),
                 x0=self.h1.ravel(),
-                method='CG',
+                method="CG",
                 jac=True,
-                options={'maxiter': self.max_inner_iter}
+                options={"maxiter": self.max_inner_iter},
             )
             self.h1 = res_h1.x.reshape(self.h1.shape)
-            
+
             res_h2 = minimize(
                 fun=lambda h2_flat: self.objective_and_grad_h2(h2_flat),
                 x0=self.h2.ravel(),
-                method='CG',
+                method="CG",
                 jac=True,
-                options={'maxiter': self.max_inner_iter}
+                options={"maxiter": self.max_inner_iter},
             )
             self.h2 = res_h2.x.reshape(self.h2.shape)
             W_k = np.vstack([self.h1, self.h2.T])
@@ -399,11 +412,11 @@ class IMC:
                     " RMSE=%.6e (testing), Mean Loss=%.6e (training)"
                 ),
                 ith_iteration,
-                self.logs['test'][-1],
-                self.logs['training'][-1],
+                self.logs["test"][-1],
+                self.logs["training"][-1],
             )
             if self.early_stopping is not None and self.early_stopping(
-                self.logs['test'][-1], W_k
+                self.logs["test"][-1], W_k
             ):
                 weight_matrix = self.early_stopping.best_weights
                 gene_feat_dim = self.h1.shape[0]
@@ -413,10 +426,10 @@ class IMC:
                 break
             if (ith_iteration + 1) % log_freq == 0 or ith_iteration == 0:
                 self.callback()
-                rmse_history.extend(self.logs['test'])
-                loss_history.extend(self.logs['training'])
-                self.logs['test'].clear()
-                self.logs['training'].clear()
+                rmse_history.extend(self.logs["test"])
+                loss_history.extend(self.logs["training"])
+                self.logs["test"].clear()
+                self.logs["training"].clear()
         self.callback()
         # Compute runtime
         runtime = time.time() - start_time

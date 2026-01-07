@@ -27,7 +27,11 @@ def svd(matrix: np.ndarray, rank: int) -> Tuple[np.ndarray, np.ndarray]:
     singular_values_truncated = singular_values[:rank]
     right_vectors_t_truncated = right_singular_vectors_t[:rank, :]
 
-    left_factor = left_vectors_truncated * np.sqrt(singular_values_truncated[np.newaxis, :])
-    right_factor = np.sqrt(singular_values_truncated[:, np.newaxis]) * right_vectors_t_truncated
+    left_factor = left_vectors_truncated * np.sqrt(
+        singular_values_truncated[np.newaxis, :]
+    )
+    right_factor = (
+        np.sqrt(singular_values_truncated[:, np.newaxis]) * right_vectors_t_truncated
+    )
 
     return left_factor, right_factor

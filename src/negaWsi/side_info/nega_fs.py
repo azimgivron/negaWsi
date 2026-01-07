@@ -10,8 +10,9 @@ from typing import Tuple
 
 import numpy as np
 
-from negaWsi.base import NegaBase
-from negaWsi.utils import svd
+from negaWsi.standard.base import NegaBase
+from negaWsi.utils.utils import svd
+
 
 class NegaFS(NegaBase):
     """
@@ -104,7 +105,7 @@ class NegaFS(NegaBase):
             np.ndarray: The latent matrix. Shape is (k x n).
         """
         return self.gene_side_info @ self.h1
-    
+
     @property
     def disease_latent(self) -> np.ndarray:
         """Compute disease latent matrix
@@ -113,7 +114,7 @@ class NegaFS(NegaBase):
             np.ndarray: The latent matrix. Shape is (k x m).
         """
         return self.h2 @ self.disease_side_info.T
-    
+
     def calculate_loss(self) -> float:
         """
         Computes the loss function value for the training data.
@@ -134,7 +135,7 @@ class NegaFS(NegaBase):
 
         loss = 0.5 * (
             self.loss_terms["|| B ⊙ (X @ h1 @ h2 @ Y.T - M) ||_F"] ** 2
-            + self.regularization_parameters["λg"] * self.loss_terms["|| h1 ||_F"] ** 2 
+            + self.regularization_parameters["λg"] * self.loss_terms["|| h1 ||_F"] ** 2
             + self.regularization_parameters["λd"] * self.loss_terms["|| h2 ||_F"] ** 2
         )
         return loss
@@ -157,7 +158,7 @@ class NegaFS(NegaBase):
         """
         return self.gene_latent @ self.disease_latent
 
-    def compute_grad_f_W_k(self) -> np.ndarray:
+    def compute_grad_f_W(self) -> np.ndarray:
         """Compute the gradients for each latent as:
 
         grad_f_W_k = (∇_h1, ∇_h2.T).T
@@ -177,7 +178,6 @@ class NegaFS(NegaBase):
             + self.regularization_parameters["λg"] * self.h1
         )
         grad_h2 = (
-            (self.gene_latent.T @ residuals) @ self.disease_side_info
-            + self.regularization_parameters["λd"] * self.h2
-        )
+            self.gene_latent.T @ residuals
+        ) @ self.disease_side_info + self.regularization_parameters["λd"] * self.h2
         return np.vstack([grad_h1, grad_h2.T])

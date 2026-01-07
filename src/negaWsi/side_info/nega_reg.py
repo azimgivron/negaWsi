@@ -10,8 +10,8 @@ from typing import Tuple
 
 import numpy as np
 
-from negaWsi.base import NegaBase
-from negaWsi.utils import svd
+from negaWsi.standard.base import NegaBase
+from negaWsi.utils.utils import svd
 
 
 class NegaReg(NegaBase):
@@ -154,20 +154,14 @@ class NegaReg(NegaBase):
         )
 
         gene_prediction = self.gene_side_info @ self.beta_g  # G @ β_G (nb_genes, k)
-        h1_residual = (
-            self.h1 - gene_prediction
-        ) # h1 - G @ β_G (nb_genes, k)
-        self.loss_terms["|| h1 - G @ β_G ||_F"] = np.linalg.norm(
-            h1_residual, ord="fro"
-        )
+        h1_residual = self.h1 - gene_prediction  # h1 - G @ β_G (nb_genes, k)
+        self.loss_terms["|| h1 - G @ β_G ||_F"] = np.linalg.norm(h1_residual, ord="fro")
         self.loss_terms["|| β_G ||_F"] = np.linalg.norm(self.beta_g, ord="fro")
 
         disease_prediction = (
             self.beta_d.T @ self.disease_side_info.T
         )  # β_D.T @ D.T (k, nb_diseases)
-        h2_residual = (
-            self.h2 - disease_prediction
-        )  # h2 - β_D.T @ D.T (k, nb_diseases)
+        h2_residual = self.h2 - disease_prediction  # h2 - β_D.T @ D.T (k, nb_diseases)
 
         self.loss_terms["|| h2 - β_D.T @ D.T ||_F"] = np.linalg.norm(
             h2_residual, ord="fro"
@@ -176,10 +170,14 @@ class NegaReg(NegaBase):
 
         loss = 0.5 * (
             self.loss_terms["|| B ⊙ (h1 @ h2 - M) ||_F"] ** 2
-            + self.regularization_parameters["λg"] * self.loss_terms["|| h1 - G @ β_G ||_F"] ** 2 
-            + self.regularization_parameters["λd"] * self.loss_terms["|| h2 - β_D.T @ D.T ||_F"] ** 2
-            + self.regularization_parameters["λ_βg"] * self.loss_terms["|| β_G ||_F"] ** 2
-            + self.regularization_parameters["λ_βd"] * self.loss_terms["|| β_D ||_F"] ** 2
+            + self.regularization_parameters["λg"]
+            * self.loss_terms["|| h1 - G @ β_G ||_F"] ** 2
+            + self.regularization_parameters["λd"]
+            * self.loss_terms["|| h2 - β_D.T @ D.T ||_F"] ** 2
+            + self.regularization_parameters["λ_βg"]
+            * self.loss_terms["|| β_G ||_F"] ** 2
+            + self.regularization_parameters["λ_βd"]
+            * self.loss_terms["|| β_D ||_F"] ** 2
         )
         return loss
 
@@ -192,7 +190,7 @@ class NegaReg(NegaBase):
         """
         return self.h1 @ self.h2
 
-    def compute_grad_f_W_k(self) -> np.ndarray:
+    def compute_grad_f_W(self) -> np.ndarray:
         """
         Compute the stacked gradient of the objective function w.r.t. all variables:
 
@@ -215,30 +213,20 @@ class NegaReg(NegaBase):
         )  # B ⊙ (h1 @ h2 - M) shape (nb_genes, nb_diseases)
 
         gene_prediction = self.gene_side_info @ self.beta_g  # G @ β_G (nb_genes, k)
-        h1_residual = (
-            self.h1 - gene_prediction
-        )  # h1 - G @ β_G (nb_genes, k)
+        h1_residual = self.h1 - gene_prediction  # h1 - G @ β_G (nb_genes, k)
         disease_prediction = (
             self.beta_d.T @ self.disease_side_info.T
         )  # β_D.T @ D.T (k, nb_diseases)
-        h2_residual = (
-            self.h2 - disease_prediction
-        )  # h2 - β_D.T @ D.T (k, nb_diseases)
+        h2_residual = self.h2 - disease_prediction  # h2 - β_D.T @ D.T (k, nb_diseases)
 
         grad_h1 = (
-            residuals @ self.h2.T
-            + self.regularization_parameters["λg"]
-            * h1_residual
+            residuals @ self.h2.T + self.regularization_parameters["λg"] * h1_residual
         )
         grad_h2 = (
-            self.h1.T @ residuals
-            + self.regularization_parameters["λd"]
-            * h2_residual
+            self.h1.T @ residuals + self.regularization_parameters["λd"] * h2_residual
         )
         grad_beta_g = (
-            -self.regularization_parameters["λg"]
-            * self.gene_side_info.T
-            @ h1_residual
+            -self.regularization_parameters["λg"] * self.gene_side_info.T @ h1_residual
             + self.regularization_parameters["λ_βg"] * self.beta_g
         )
         grad_beta_d = (

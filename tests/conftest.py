@@ -11,9 +11,9 @@ Mask = NDArray[np.bool_]
 
 
 @pytest.fixture
-def tune_regularization() -> Callable[
-    [type, Dict[str, Dict[str, float | bool]], Dict, int], Dict[str, float]
-]:
+def tune_regularization() -> (
+    Callable[[type, Dict[str, Dict[str, float | bool]], Dict, int], Dict[str, float]]
+):
     """Return a tuner that runs a small Optuna search for stable regularization.
 
     Returns:
@@ -38,6 +38,7 @@ def tune_regularization() -> Callable[
         Returns:
             Dict[str, float]: The best parameters.
         """
+
         def objective(trial: optuna.Trial) -> float:
             reg = {
                 name: trial.suggest_float(name, **params)
@@ -54,6 +55,7 @@ def tune_regularization() -> Callable[
 
     return _tune
 
+
 def _masks(R: Matrix, p_testval: float, p_val_within: float) -> Tuple[Mask, Mask, Mask]:
     """Create train/val/test masks for a matrix given split proportions.
 
@@ -66,12 +68,12 @@ def _masks(R: Matrix, p_testval: float, p_val_within: float) -> Tuple[Mask, Mask
         Tuple[Mask, Mask, Mask]: (train_mask, val_mask, test_mask).
     """
     N = R.size
-    
+
     n_testval = int(np.ceil(N * p_testval))
     n_val = int(np.ceil(n_testval * p_val_within))
 
     rng = np.random.default_rng(seed=0)
-    idx = rng.permutation(N) # all indices, shuffled
+    idx = rng.permutation(N)  # all indices, shuffled
     testval = idx[:n_testval]
     val_idx = testval[:n_val]
     test_idx = testval[n_val:]
@@ -89,10 +91,13 @@ def _masks(R: Matrix, p_testval: float, p_val_within: float) -> Tuple[Mask, Mask
     test_mask = test_mask.reshape(R.shape)
     return train_mask, val_mask, test_mask
 
+
 @pytest.fixture(
     params=[
-        {"n": 10, "m": 10, "k": 4},
-        {"n": 50, "m": 50, "k": 18},
+        {"n": 10, "m": 10, "k": 4, "seed": 0},
+        {"n": 50, "m": 50, "k": 18, "seed": 0},
+        {"n": 10, "m": 10, "k": 4, "seed": 1},
+        {"n": 50, "m": 50, "k": 18, "seed": 1},
     ]
 )
 def nega_case(request: pytest.FixtureRequest) -> Tuple[Matrix, Mask, Mask, Mask, int]:
@@ -106,26 +111,32 @@ def nega_case(request: pytest.FixtureRequest) -> Tuple[Matrix, Mask, Mask, Mask,
     n = params["n"]
     m = params["m"]
     k = params["k"]
+    seed = params["seed"]
 
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(seed)
     H1_true = rng.random((n, k))
     H2_true = rng.random((k, m))
     R = H1_true @ H2_true
 
     p_testval = 0.1
-    p_val_within =0.40
+    p_val_within = 0.40
 
     train_mask, val_mask, test_mask = _masks(R, p_testval, p_val_within)
 
     return R, train_mask, val_mask, test_mask, k
 
+
 @pytest.fixture(
     params=[
-        {"n": 10, "m": 10, "k": 4},
-        {"n": 50, "m": 50, "k": 18},
+        {"n": 10, "m": 10, "k": 4, "seed": 0},
+        {"n": 50, "m": 50, "k": 18, "seed": 0},
+        {"n": 10, "m": 10, "k": 4, "seed": 1},
+        {"n": 50, "m": 50, "k": 18, "seed": 1},
     ]
 )
-def sparse_nega_case(request: pytest.FixtureRequest) -> Tuple[sp.csr_matrix, sp.csr_matrix, sp.csr_matrix, sp.csr_matrix, int]:
+def sparse_nega_case(
+    request: pytest.FixtureRequest,
+) -> Tuple[sp.csr_matrix, sp.csr_matrix, sp.csr_matrix, sp.csr_matrix, int]:
     """Provide the reconstruction toy problem.
 
     Returns:
@@ -136,9 +147,10 @@ def sparse_nega_case(request: pytest.FixtureRequest) -> Tuple[sp.csr_matrix, sp.
     n = params["n"]
     m = params["m"]
     k = params["k"]
+    seed = params["seed"]
 
-    rng = np.random.default_rng(0)
-    success_prob = .35
+    rng = np.random.default_rng(seed)
+    success_prob = 0.35
     H1_true = rng.binomial(1, p=success_prob, size=(n, k))
     H2_true = rng.binomial(1, p=success_prob, size=(k, m))
     R = H1_true @ H2_true
@@ -160,7 +172,9 @@ def sparse_nega_case(request: pytest.FixtureRequest) -> Tuple[sp.csr_matrix, sp.
         {"n": 5, "m": 5, "p": 6, "q": 6, "k": 4},
     ]
 )
-def side_info_case(request: pytest.FixtureRequest) -> Tuple[Matrix, Mask, Mask, Matrix, Matrix, int]:
+def side_info_case(
+    request: pytest.FixtureRequest,
+) -> Tuple[Matrix, Mask, Mask, Matrix, Matrix, int]:
     """Provide the inductive side-information toy problem for NegaFS.
 
     Returns:
@@ -180,7 +194,7 @@ def side_info_case(request: pytest.FixtureRequest) -> Tuple[Matrix, Mask, Mask, 
     H1_true = rng.random((p, k))
     H2_true = rng.random((k, q))
     R = X @ H1_true @ H2_true @ Y
-    
+
     p_testval = 0.1
     p_val_within = 0.40
 
@@ -188,12 +202,15 @@ def side_info_case(request: pytest.FixtureRequest) -> Tuple[Matrix, Mask, Mask, 
 
     return R, train_mask, val_mask, test_mask, X, Y.T, k
 
+
 @pytest.fixture(
     params=[
         {"n": 5, "m": 5, "p": 6, "q": 6, "k": 4},
     ]
 )
-def reg_side_info_case(request: pytest.FixtureRequest) -> Tuple[Matrix, Mask, Mask, Matrix, Matrix, int]:
+def reg_side_info_case(
+    request: pytest.FixtureRequest,
+) -> Tuple[Matrix, Mask, Mask, Matrix, Matrix, int]:
     """Provide the side-information-regularized toy problem for NegaReg.
 
     Returns:

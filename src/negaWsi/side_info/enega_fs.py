@@ -9,7 +9,7 @@ the PPI data.
 
 import numpy as np
 
-from negaWsi.nega_fs import NegaFS
+from negaWsi.side_info.nega_fs import NegaFS
 
 
 class ENegaFS(NegaFS):
@@ -58,15 +58,13 @@ class ENegaFS(NegaFS):
         so:
 
             Tr(h1.T @ X.T @ L @ X @ h1) = Tr(h_1.T @ G) = \sum_{i,j} h_1_{ij} * G_{ij}
-        
+
         with G = X.T @ L @ X @ h_1
 
         Returns:
             float: The manifold regularization term.
         """
-        G = self.gene_side_info.T @ (
-            self.laplacian @ self.gene_latent
-        )
+        G = self.gene_side_info.T @ (self.laplacian @ self.gene_latent)
         return np.sum(self.h1 * G)
 
     def calculate_loss(self) -> float:
@@ -93,13 +91,14 @@ class ENegaFS(NegaFS):
 
         loss = 0.5 * (
             self.loss_terms["|| B ⊙ (X @ h1 @ h2 @ Y.T - M) ||_F"] ** 2
-            + self.regularization_parameters["λg"] * self.loss_terms["|| h1 ||_F"] ** 2 
+            + self.regularization_parameters["λg"] * self.loss_terms["|| h1 ||_F"] ** 2
             + self.regularization_parameters["λd"] * self.loss_terms["|| h2 ||_F"] ** 2
-            + self.regularization_parameters["λG"] * self.loss_terms["Tr(h1.T @ X.T @ L @ X @ h1)"]
+            + self.regularization_parameters["λG"]
+            * self.loss_terms["Tr(h1.T @ X.T @ L @ X @ h1)"]
         )
         return loss
 
-    def compute_grad_f_W_k(self) -> np.ndarray:
+    def compute_grad_f_W(self) -> np.ndarray:
         """Compute the gradients for each latent as:
 
         grad_f_W_k = (∇_h1, ∇_h2.T).T

@@ -7,8 +7,8 @@ This module implements The Standard Non-Euclidean Gradient Algorithm for matrix 
 
 import numpy as np
 
-from negaWsi.base import NegaBase
-from negaWsi.utils import svd
+from negaWsi.standard.base import NegaBase
+from negaWsi.utils.utils import svd
 
 
 class Nega(NegaBase):
@@ -77,7 +77,7 @@ class Nega(NegaBase):
 
         loss = 0.5 * (
             self.loss_terms["|| B ⊙ (h1 @ h2 - M) ||_F"] ** 2
-            + self.regularization_parameters["λg"] * self.loss_terms["|| h1 ||_F"] ** 2 
+            + self.regularization_parameters["λg"] * self.loss_terms["|| h1 ||_F"] ** 2
             + self.regularization_parameters["λd"] * self.loss_terms["|| h2 ||_F"] ** 2
         )
         return loss
@@ -98,10 +98,10 @@ class Nega(NegaBase):
         """
         return self.h1 @ self.h2
 
-    def compute_grad_f_W_k(self) -> np.ndarray:
+    def compute_grad_f_W(self) -> np.ndarray:
         """Compute the gradients for for each latent as:
 
-        grad_f_W_k = (∇_h1, ∇_h2.T).T
+        grad_f(W_k) = (∇_h1, ∇_h2.T).T
 
         where:
         - ∇_h1 = R @ h2.T + λg * h1,

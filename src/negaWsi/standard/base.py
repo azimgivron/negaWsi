@@ -8,13 +8,38 @@ This module implements the template for Non-Euclidean Gradient Algorithm.
 import abc
 import logging
 import time
-from typing import Tuple, Dict
+from dataclasses import dataclass
+from typing import Dict
 
 import numpy as np
 
-from negaWsi.early_stopping import EarlyStopping
-from negaWsi.flip_labels import FlipLabels
-from negaWsi.result import Result
+from negaWsi.utils.early_stopping import EarlyStopping
+from negaWsi.utils.flip_labels import FlipLabels
+from negaWsi.utils.result import Result
+
+
+@dataclass
+class State:
+    """Container for optimization state across iterations.
+
+    Attributes:
+        W_k (np.ndarray): Current stacked factor matrix. Shape: (n + m, rank).
+        W_k_next (np.ndarray): Next stacked factor matrix after a step. Shape: (n + m, rank).
+        grad_f_W_k (np.ndarray): Gradient of the objective at W_k. Shape: (n + m, rank).
+        loss_W_k (float): Loss value at W_k.
+        loss_W_k_next (float): Loss value at W_k_next.
+    """
+
+    W_k: np.ndarray = None
+    W_k_next: np.ndarray = None
+    grad_f_W_k: np.ndarray = None
+    loss_W_k: float = None
+    loss_W_k_next: float = None
+
+    def update(self):
+        """Advance the state to the next iterate."""
+        self.W_k = self.W_k_next
+        self.loss_W_k = self.loss_W_k_next
 
 
 class NegaBase(metaclass=abc.ABCMeta):
@@ -32,21 +57,19 @@ class NegaBase(metaclass=abc.ABCMeta):
         test_mask (np.ndarray): Boolean mask indicating observed entries in `matrix`
             for testing. Shape: (n, m).
         rank (int): The target rank for the low-rank approximation.
-        regularization_parameters (float): Regularization parameters used in the optimization
+        regularization_parameters (Dict[str, float]): Regularization parameters used in the optimization
             objective.
         iterations (int): Maximum number of optimization iterations.
         symmetry_parameter (float): Parameter used to adjust gradient symmetry during
             the optimization process.
-        smoothness_parameter (float): Initial smoothness parameter for the optimization steps.
+        lipschitz_smoothness (float): Initial smoothness parameter for the optimization steps.
         rho_increase (float): Factor used to dynamically increase the optimization step size.
         rho_decrease (float): Factor used to dynamically decrease the optimization step size.
-        tau (float):
-        h1 (np.ndarray): Left factor matrix in the low-rank approximation.
-        h2 (np.ndarray): Right factor matrix in the low-rank approximation.
+        tau (float): Kernel regularization parameter used in h(W).
+        h1 (np.ndarray): Left factor matrix in the low-rank approximation. Shape: (n, rank).
+        h2 (np.ndarray): Right factor matrix in the low-rank approximation. Shape: (rank, m).
         logger (logging.Logger): Logger instance for debugging and monitoring training progress.
         seed (int): Seed for reproducible random initialization.
-        save_name (str or pathlib.Path or None): File path where the model will be saved.
-            If None, the model will not be saved after training.
         flip_labels (FlipLabels or None): Object that simulates label noise by randomly flipping
             a fraction of positive (1) entries to negatives (0) in the training mask.
         early_stopping (EarlyStopping or None): Mechanism for monitoring training loss and
@@ -64,7 +87,7 @@ class NegaBase(metaclass=abc.ABCMeta):
         regularization_parameters: Dict[str, float],
         iterations: int,
         symmetry_parameter: float,
-        smoothness_parameter: float,
+        lipschitz_smoothness: float,
         rho_increase: float,
         rho_decrease: float,
         tau: float = None,
@@ -77,24 +100,24 @@ class NegaBase(metaclass=abc.ABCMeta):
         parameters for matrix approximation.
 
         Args:
-            matrix (np.ndarray: Input matrix to be approximated. Shape: (n, m),
+            matrix (np.ndarray): Input matrix to be approximated. Shape: (n, m),
                 where n is the number of genes and m is the number of diseases.
             train_mask (np.ndarray): Mask indicating observed entries in `matrix` for training.
                 Shape: (n, m).
             test_mask (np.ndarray): Mask indicating observed entries in `matrix` for testing.
                 Shape: (n, m).
             rank (int): Desired rank for the low-rank approximation.
-            regularization_parameters (Dict[str, float],): Regularization parameters for the optimization
+            regularization_parameters (Dict[str, float]): Regularization parameters for the optimization
                 objective.
             iterations (int): Maximum number of optimization iterations.
             symmetry_parameter (float): Parameter for adjusting gradient symmetry during
                 optimization.
-            smoothness_parameter (float): Initial smoothness parameter for optimization steps.
+            lipschitz_smoothness (float): Initial smoothness parameter for optimization steps.
             rho_increase (float): Multiplicative factor to dynamically increase the optimization
                 step size.
             rho_decrease (float): Multiplicative factor to dynamically decrease the optimization
                 step size.
-            tau (float):
+            tau (float, optional): Kernel regularization parameter used in h(W).
             seed (int, optional): Seed for reproducible random initialization. Defaults to 123.
             flip_labels (FlipLabels, optional): Object that simulates label noise by randomly
                 flipping a fraction of positive (1) entries to negatives (0) in the training mask.
@@ -109,7 +132,7 @@ class NegaBase(metaclass=abc.ABCMeta):
         self.regularization_parameters = regularization_parameters
         self.iterations = iterations
         self.symmetry_parameter = symmetry_parameter
-        self.smoothness_parameter = smoothness_parameter
+        self.lipschitz_smoothness = lipschitz_smoothness
         self.rho_increase = rho_increase
         self.rho_decrease = rho_decrease
         self.h1 = None
@@ -117,7 +140,13 @@ class NegaBase(metaclass=abc.ABCMeta):
         self.flip_labels = flip_labels
         self.early_stopping = early_stopping
         self.loss_terms = {}
-        self.tau = tau
+        if tau is not None:
+            self.tau = tau
+        else:
+            mat = self.matrix.copy()
+            mat[~self.train_mask] = 0
+            self.tau = np.linalg.norm(mat, ord="fro") / 3
+
         # Set random seed for reproducibility
         np.random.seed(seed)
 
@@ -134,10 +163,10 @@ class NegaBase(metaclass=abc.ABCMeta):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def compute_grad_f_W_k(self) -> np.ndarray:
-        """Compute the gradients for for each latent as:
+    def compute_grad_f_W(self) -> np.ndarray:
+        """Compute the gradients for each latent as:
 
-        grad_f_W_k = (∇_h1, ∇_h2).T
+        grad_f(W_k) = (∇_h1, ∇_h2).T
 
         Returns:
             np.ndarray: The gradient of the latents (n+m x rank)
@@ -154,7 +183,7 @@ class NegaBase(metaclass=abc.ABCMeta):
         """
         raise NotImplementedError
 
-    def kernel(self, W: np.ndarray, tau: float) -> float:
+    def kernel(self, W: np.ndarray) -> float:
         """
         Computes the value of the kernel function h for a given matrix W and
         regularization parameter tau.
@@ -164,34 +193,20 @@ class NegaBase(metaclass=abc.ABCMeta):
 
         Args:
             W (np.ndarray): The input matrix.
-            tau (float): Regularization parameter.
 
         Returns:
             float: The computed value of the h function.
         """
         norm = np.linalg.norm(W, ord="fro")
-        h_value = 0.25 * norm**4 + tau/2 * norm**2
+        h_value = 0.25 * norm**4 + self.tau / 2 * norm**2
         return h_value
-
-    def init_tau(self) -> float:
-        """
-        Initialize tau value.
-
-        Returns:
-            float: tau value.
-        """
-        if self.tau is not None:
-            return self.tau
-        mat = self.matrix.copy()
-        mat[~self.train_mask] = 0
-        return np.linalg.norm(mat, ord="fro") / 3
 
     def init_Wk(self) -> np.ndarray:
         """
         Initialize weight block matrix.
 
         Returns:
-            np.ndarray: The weight block matrix.
+            np.ndarray: The weight block matrix. Shape: (n + m, rank).
         """
         return np.vstack([self.h1, self.h2.T])
 
@@ -200,12 +215,12 @@ class NegaBase(metaclass=abc.ABCMeta):
         Set the weights individually from the stacked block matrix.
 
         Args:
-            weight_matrix (np.ndarray): The stacked block matrix.
+            weight_matrix (np.ndarray): The stacked block matrix. Shape: (n + m, rank).
         """
         nb_genes = self.h1.shape[0]
         self.h1 = weight_matrix[:nb_genes, :]
         self.h2 = weight_matrix[nb_genes:, :].T
-    
+
     @property
     def gene_latent(self) -> np.ndarray:
         """Compute gene latent matrix
@@ -214,7 +229,7 @@ class NegaBase(metaclass=abc.ABCMeta):
             np.ndarray: The latent matrix. Shape is (n x k).
         """
         return self.h1
-    
+
     @property
     def disease_latent(self) -> np.ndarray:
         """Compute disease latent matrix
@@ -224,32 +239,29 @@ class NegaBase(metaclass=abc.ABCMeta):
         """
         return self.h2
 
-    def cardano(self, tau: float, delta: float) -> float:
+    def cardano(self, delta: float) -> float:
         """
         Solve the cubic equation:
             s^3 - tau * s^2 - delta = 0
         using Cardano's method.
 
         Args:
-            tau (float): Coefficient τ in the equation.
             delta (float): Constant term δ in the equation.
 
         Returns:
             float: The unique real root s of the cubic.
         """
-        tau1 = -(tau**2) / 3
-        tau2 = (-2 * tau**3 - 27 * delta) / 27
+        tau1 = -(self.tau**2) / 3
+        tau2 = (-2 * self.tau**3 - 27 * delta) / 27
         discr = (tau2 / 2) ** 2 + (tau1 / 3) ** 3
         sqrt_disc = np.sqrt(discr, dtype=np.complex128)
-        t_k = (tau / 3) + (
+        t_k = (self.tau / 3) + (
             np.power(-tau2 / 2 + sqrt_disc, 1 / 3, dtype=np.complex128)
             + np.power(-tau2 / 2 - sqrt_disc, 1 / 3, dtype=np.complex128)
         ).real
         return t_k
 
-    def bregman_distance(
-        self, W_next: np.ndarray, W_current: np.ndarray, tau: float
-    ) -> float:
+    def bregman_distance(self, W_next: np.ndarray, W_current: np.ndarray) -> float:
         """
         Computes the Bregman distance:
             D_h = h(W_next) - h(W_current) - <grad_h(W_current), W_next - W_current>
@@ -257,16 +269,17 @@ class NegaBase(metaclass=abc.ABCMeta):
         Args:
             W_next (np.ndarray): The updated input sparse matrix.
             W_current (np.ndarray): The current input sparse matrix.
-            tau (float): Regularization parameter.
 
         Returns:
             float: The computed Bregman distance.
         """
-        h_W_next = self.kernel(W_next, tau)
-        h_W_current = self.kernel(W_current, tau)
-        linear_approx = (self.compute_grad_h_W(W_current, tau) * (W_next - W_current)).sum()
+        h_W_next = self.kernel(W_next)
+        h_W_current = self.kernel(W_current)
+        linear_approx = np.vdot(self.compute_grad_h_W(W_current), (W_next - W_current))
         dist = h_W_next - (h_W_current + linear_approx)
-        assert dist >= -1e-3, f'Bregman distance must always be positive: D_h = {dist:.4e}'
+        assert (
+            dist >= -1e-3
+        ), f"Bregman distance must always be positive: D_h = {dist:.4e}"
         return dist
 
     def calculate_training_residual(self) -> np.ndarray:
@@ -291,7 +304,6 @@ class NegaBase(metaclass=abc.ABCMeta):
         residual[~self.train_mask] = 0
         return residual
 
-
     def calculate_rmse(self, mask: np.ndarray) -> float:
         """
         Computes the Root Mean Square Error (RMSE).
@@ -309,7 +321,12 @@ class NegaBase(metaclass=abc.ABCMeta):
         return rmse
 
     def callback(
-        self, ith_iteration: int, training_loss: np.ndarray, testing_loss: np.ndarray, grad_f_W_k: np.ndarray, step_size: float
+        self,
+        ith_iteration: int,
+        training_loss: np.ndarray,
+        testing_loss: np.ndarray,
+        grad_f_W_k: np.ndarray,
+        step_size: float,
     ):
         """
         Callback to add logs or whatever the user wants compute between 'log_freq'
@@ -326,34 +343,27 @@ class NegaBase(metaclass=abc.ABCMeta):
             step_size (float): The step size.
         """
 
-    def compute_grad_h_W(self, W: np.ndarray, tau: float) -> np.ndarray:
+    def compute_grad_h_W(self, W: np.ndarray) -> np.ndarray:
         """Compute the gradients for in the kernel space.
 
         ∇_h(W) = (||W||_F^2 + tau) * W
 
         Args:
             W (np.ndarray): Stacked factor matrices.
-            tau (float): Regularization parameter.
 
         Returns:
             np.ndarray: The gradient of the latents in the kernel space.
         """
-        return (np.linalg.norm(W, ord="fro") ** 2 + tau) * W
+        return (np.linalg.norm(W, ord="fro") ** 2 + self.tau) * W
 
-    def substep(
-        self,
-        W_k: np.ndarray,
-        tau: float,
-        step_size: float,
-        grad_f_W_k: np.ndarray,
-    ) -> Tuple[np.ndarray, float]:
+    def step(self, state: State) -> float:
         """
-        Performs a single substep in the optimization process to update the factor matrices.
+        Performs a single step in the optimization process to update the factor matrices.
 
-        This substep calculates the next iterate W_{k+1} using the gradient of the objective
+        This step calculates the next iterate W_{k+1} using the gradient of the objective
         function and an adaptive step size.
 
-        Steps in the Substep Process:
+        Steps in the Process:
 
         1. Compute the Gradient Step: step = grad_h_W_k - step_size * grad_f_W_k
         2. Solve the Cubic Equation for the Step Size t.
@@ -361,26 +371,82 @@ class NegaBase(metaclass=abc.ABCMeta):
         4. Split W_{k+1} into Factor Matrices.
 
         Args:
-            W_k (np.ndarray): Current stacked factor matrices.
-            tau (float): Regularization parameter.
-            step_size (float): Learning rate for the gradient step.
-            grad_f_W_k (np.ndarray): Gradient of the objective function at W_k.
+            state (State): Current optimization state.
 
         Returns:
-            Tuple[np.ndarray, float]:
-                - Updated stacked matrix W_{k+1}.
-                - New loss value f(W_{k+1}).
+            float: Loss value f(W_{k+1}).
         """
-        step = self.compute_grad_h_W(W_k, tau) - (
-            step_size * grad_f_W_k
-        )
+        step = self.compute_grad_h_W(state.W_k) - (state.step_size * state.grad_f_W_k)
         delta = np.linalg.norm(step, ord="fro") ** 2
         # Solve the cubic s³ – τ s² – Δ = 0 by Cardano
-        t_k = self.cardano(tau, delta)
-        W_k_next = (1 / t_k) * step
-        self.set_weights(W_k_next)
-        loss = self.calculate_loss()
-        return W_k_next, loss
+        t_k = self.cardano(delta)
+        state.W_k_next = (1 / t_k) * step
+        self.set_weights(state.W_k_next)
+        state.loss_W_k_next = self.calculate_loss()
+
+    def non_euclidean_descent_lemma_cond(self, state: State):
+        """Check the non-Euclidean descent lemma condition.
+
+        Args:
+            state (State): Current optimization state.
+
+        Returns:
+            bool: True if the descent lemma condition is satisfied.
+        """
+        linear_approx = np.vdot(state.grad_f_W_k, (state.W_k_next - state.W_k))
+        bregman = self.bregman_distance(state.W_k_next, state.W_k)
+        left = state.loss_W_k_next
+        right = (state.loss_W_k + linear_approx) + self.lipschitz_smoothness * bregman
+        cond = left <= right
+        self.logger.debug(
+            "[Descent Lemma] Satisfied %s: %.4e <= %.4e", cond, left, right
+        )
+        return cond
+
+    def backtrack(self, state: State):
+        """Adjust the step size until the descent condition is satisfied.
+
+        Args:
+            state (State): Current optimization state.
+        """
+        # Inner loop to adjust step size
+        flag = 0
+        while not self.non_euclidean_descent_lemma_cond(state):
+            flag = 1
+            # Adjust step size
+            old_step_size = state.step_size
+            self.lipschitz_smoothness *= self.rho_increase
+            state.step_size = (1 + self.symmetry_parameter) / self.lipschitz_smoothness
+
+            self.logger.debug(
+                "[Step Size Decrease] %.4e -> %.4e", old_step_size, state.step_size
+            )
+            if state.step_size <= 1e-10:
+                self.logger.warning(
+                    "[Step Size Too Small] Step size of %.4e can lead to overflow. Training interrupted.",
+                    state.step_size,
+                )
+                state.loss_W_k_next = np.nan
+                break
+
+            self.step(state)
+        if flag == 1:
+            # Adjust step size
+            self.lipschitz_smoothness *= self.rho_decrease
+
+    def update_grad_f_W(self, state: State):
+        """Update gradient and log tracked loss terms.
+
+        Args:
+            state (State): Current optimization state.
+        """
+        state.grad_f_W_k = self.compute_grad_f_W()
+        for key, value in self.loss_terms.items():
+            self.logger.debug(
+                ("[Main Loop] %s: %.6e"),
+                key,
+                value,
+            )
 
     def run(self, log_freq: int = 10) -> Result:
         """
@@ -424,124 +490,75 @@ class NegaBase(metaclass=abc.ABCMeta):
         """
         # Start measuring runtime
         start_time = time.time()
-
-        # Initialize loss and RMSE history
-        res_norm = self.calculate_loss()
-        testing_loss = self.calculate_rmse(self.test_mask)
-        loss = [res_norm]
-        rmse = [testing_loss]
+        state = State()
 
         # Stack h1 and h2 for optimization
-        W_k = self.init_Wk()
-        step_size = 1 / self.smoothness_parameter
-        tau = self.init_tau()
+        state.W_k = self.init_Wk()
+        state.step_size = 1 / self.lipschitz_smoothness
         self.logger.debug(
-            "Starting optimization with tau=%f, step_size=%f", tau, step_size
+            "Starting optimization with tau=%f, step_size=%f", self.tau, state.step_size
         )
-        # Main optimization loop
-        iterations_count = 0
-        for ith_iteration in range(self.iterations):
-            iterations_count = ith_iteration
-            inner_loop_it = 0
-            flag = 0
+        # Initialize loss and RMSE history
+        state.loss_W_k = self.calculate_loss()
+        testing_loss = self.calculate_rmse(self.test_mask)
+        loss = [state.loss_W_k]
+        rmse = [testing_loss]
 
+        # Main optimization loop
+        for ith_iteration in range(self.iterations):
             self.logger.debug(
                 (
-                    "[Main Loop] Iteration %d, Inner Loop %d:"
+                    "[Main Loop] Iteration %d:"
                     " RMSE=%.6e (testing), Mean Loss=%.6e (training)"
                 ),
                 ith_iteration,
-                inner_loop_it,
                 rmse[-1],
                 loss[-1],
             )
-            grad_f_W_k = self.compute_grad_f_W_k()
-            for key, value in self.loss_terms.items():
-                self.logger.debug(
-                    ("[Main Loop] %s: %.6e"),
-                    key,
-                    value,
+            # compute gradients and update W
+            self.update_grad_f_W(state)
+            self.step(state)
+
+            # log
+            if (ith_iteration + 1) % log_freq == 0 or ith_iteration == 0:
+                self.callback(
+                    ith_iteration,
+                    state.loss_W_k_next,
+                    testing_loss,
+                    state.grad_f_W_k,
+                    state.step_size,
                 )
 
-            substep_res = self.substep(W_k, tau, step_size, grad_f_W_k)
-            if substep_res is None:
-                break
-            W_k_next, res_norm_next_it = substep_res
-            # Inner loop to adjust step size
-            linear_approx = (grad_f_W_k * (W_k_next - W_k)).sum()
-            bregman = self.bregman_distance(W_k_next, W_k, tau)
-            
-            left = res_norm_next_it
-            right = (res_norm + linear_approx) + self.smoothness_parameter * bregman
-            non_euclidean_descent_lemma_cond = left <= right
-            self.logger.debug(
-                        "[Descent Lemma] Satisfied %s: %.4e <= %.4e",
-                        non_euclidean_descent_lemma_cond,
-                        left,
-                        right
-                )
-            if (ith_iteration + 1) % log_freq == 0 or ith_iteration == 0:
-                self.callback(ith_iteration, res_norm_next_it, testing_loss, grad_f_W_k, step_size)
-            while not non_euclidean_descent_lemma_cond:
-                flag = 1
-                inner_loop_it += 1
-                # Adjust step size
-                old_step_size = step_size
-                self.smoothness_parameter *= self.rho_increase
-                step_size = (1 + self.symmetry_parameter) / self.smoothness_parameter
-                self.logger.debug(
-                        "[Step Size Decrease] %.4e -> %.4e",
-                        old_step_size,
-                        step_size
-                )
-                if step_size <= 1e-10:
-                    self.logger.warning(
-                            "[Step Size Too Small] Step size of %.4e can lead to overflow. Training interrupted.",
-                            step_size
-                    )
-                    res_norm_next_it = np.nan
-                    break
-                substep_res = self.substep(W_k, tau, step_size, grad_f_W_k)
-                if substep_res is None:
-                    break
-                W_k_next, res_norm_next_it = substep_res
-                linear_approx = (grad_f_W_k * (W_k_next - W_k)).sum()
-                bregman = self.bregman_distance(W_k_next, W_k, tau)
-                left = res_norm_next_it
-                right = (res_norm + linear_approx) + self.smoothness_parameter * bregman
-                non_euclidean_descent_lemma_cond = left <= right
-                self.logger.debug(
-                            "[Descent Lemma: Backtracking] Satisfied %s: f(W_{k+1})=%.4e <= [f(W_k)+∇f(W_k)*(W_{k+1} - W_k)]+L_f*D_h=%.4e",
-                            non_euclidean_descent_lemma_cond,
-                            left,
-                            right
-                )
+            self.backtrack(state)
+
             # Break if loss becomes NaN
-            if np.isnan(res_norm_next_it):
+            if np.isnan(state.loss_W_k_next):
                 self.logger.warning(
                     "[NaN Loss] Iteration %d: Loss is NaN, exiting loop.", ith_iteration
                 )
                 break
-            if flag == 1:
-                # Adjust step size
-                self.smoothness_parameter *= self.rho_decrease
 
             # Update variables for the next iteration
-            W_k = W_k_next
-            step_size = (1 + self.symmetry_parameter) / self.smoothness_parameter
-
+            state.update()
             testing_loss = self.calculate_rmse(self.test_mask)
-            loss.append(res_norm_next_it)
+            loss.append(state.loss_W_k)
             rmse.append(testing_loss)
-            res_norm = res_norm_next_it
+
             if self.early_stopping is not None and self.early_stopping(
-                testing_loss, W_k
+                testing_loss, state.W_k
             ):
                 self.set_weights(self.early_stopping.best_weights)
                 self.logger.debug("[Early Stopping] Training interrupted.")
                 if ith_iteration % log_freq != 0:
-                    self.callback(ith_iteration, res_norm_next_it, testing_loss, grad_f_W_k, step_size)
+                    self.callback(
+                        ith_iteration,
+                        state.loss_W_k_next,
+                        testing_loss,
+                        state.grad_f_W_k,
+                        state.step_size,
+                    )
                 break
+
         # Compute runtime
         runtime = time.time() - start_time
         self.logger.debug(
@@ -549,7 +566,7 @@ class NegaBase(metaclass=abc.ABCMeta):
         )
         training_data = Result(
             loss_history=loss,
-            iterations=iterations_count,
+            iterations=ith_iteration,
             rmse_history=rmse,
             runtime=runtime,
         )

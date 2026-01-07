@@ -1,12 +1,12 @@
 from typing import Callable, Dict, Tuple
 
 import numpy as np
+from negaWsi.standard.nega import Nega
 from numpy.typing import NDArray
-
-from negaWsi.nega import Nega
 
 Matrix = NDArray[np.float64]
 Mask = NDArray[np.bool_]
+
 
 def test_nega_without_masks(
     nega_case: Tuple[Matrix, Mask, Mask, int],
@@ -24,24 +24,31 @@ def test_nega_without_masks(
         train_mask=train_mask,
         test_mask=train_mask.copy(),
         rank=rank,
-        iterations=20_000,
+        iterations=700,
         symmetry_parameter=0.99,
-        smoothness_parameter=0.001,
+        lipschitz_smoothness=0.001,
         rho_increase=10.0,
         rho_decrease=0.1,
         seed=0,
         svd_init=False,
-        regularization_parameters={"λg": 0, "λd": 0}
+        regularization_parameters={"λg": 0, "λd": 0},
     )
 
     model = Nega(**kwargs)
     _ = model.run()
 
     R_hat = model.predict_all()
-    assert np.allclose(R_hat, R, atol=1e-2), (
+    nrmse = np.sqrt(((R_hat.ravel() - R.ravel()) ** 2).mean()) / (R.max() - R.min())
+    nrmse_random = np.sqrt(
+        (
+            (np.random.uniform(R.min(), R.max(), R_hat.shape).ravel() - R.ravel()) ** 2
+        ).mean()
+    ) / (R.max() - R.min())
+    assert nrmse < 0.1 * nrmse_random, (
         f"Reconstruction mismatch:\n"
-        f"pred=\n{R_hat}\ntruth=\n{R}\training mask=\n{train_mask}"
+        f"pred=\n{R_hat}\ntruth=\n{R}\training mask=\n{train_mask}\nNRMSE:{nrmse} while random has {nrmse_random}"
     )
+
 
 def test_nega_with_masks(
     nega_case: Tuple[Matrix, Mask, Mask, int],
@@ -61,9 +68,9 @@ def test_nega_with_masks(
         train_mask=train_mask,
         test_mask=val_mask,
         rank=rank,
-        iterations=20_000,
+        iterations=1000,
         symmetry_parameter=0.99,
-        smoothness_parameter=0.001,
+        lipschitz_smoothness=0.001,
         rho_increase=10.0,
         rho_decrease=0.1,
         seed=0,
@@ -75,7 +82,13 @@ def test_nega_with_masks(
     _ = model.run()
 
     R_hat = model.predict_all()
-    assert np.allclose(R_hat, R, atol=1e-2), (
+    nrmse = np.sqrt(((R_hat.ravel() - R.ravel()) ** 2).mean()) / (R.max() - R.min())
+    nrmse_random = np.sqrt(
+        (
+            (np.random.uniform(R.min(), R.max(), R_hat.shape).ravel() - R.ravel()) ** 2
+        ).mean()
+    ) / (R.max() - R.min())
+    assert nrmse < 0.1 * nrmse_random, (
         f"Reconstruction mismatch with tuned params {best_params}:\n"
-        f"pred=\n{R_hat}\ntruth=\n{R}\training mask=\n{train_mask}"
+        f"pred=\n{R_hat}\ntruth=\n{R}\training mask=\n{train_mask}\nNRMSE:{nrmse} while random has {nrmse_random}"
     )

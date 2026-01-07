@@ -8,15 +8,15 @@ This module implements the template for Non-Euclidean Gradient Algorithm.
 import abc
 import logging
 import time
-from typing import Tuple, Dict
+from typing import Dict, Tuple
 
 import numpy as np
 import scipy.sparse as sp
 
-from negaWsi.early_stopping import EarlyStopping
-from negaWsi.result import Result
-from negaWsi.flip_labels import FlipLabels
-import negaWsi.base as nb
+import negaWsi.standard.base as nb
+from negaWsi.utils.early_stopping import EarlyStopping
+from negaWsi.utils.flip_labels import FlipLabels
+from negaWsi.utils.result import Result
 
 
 class NegaBase(nb.NegaBase):
@@ -39,7 +39,7 @@ class NegaBase(nb.NegaBase):
         iterations (int): Maximum number of optimization iterations.
         symmetry_parameter (float): Parameter used to adjust gradient symmetry during
             the optimization process.
-        smoothness_parameter (float): Initial smoothness parameter for the optimization steps.
+        lipschitz_smoothness (float): Initial smoothness parameter for the optimization steps.
         rho_increase (float): Factor used to dynamically increase the optimization step size.
         rho_decrease (float): Factor used to dynamically decrease the optimization step size.
         tau (float):
@@ -66,7 +66,7 @@ class NegaBase(nb.NegaBase):
         regularization_parameters: Dict[str, float],
         iterations: int,
         symmetry_parameter: float,
-        smoothness_parameter: float,
+        lipschitz_smoothness: float,
         rho_increase: float,
         rho_decrease: float,
         tau: float = None,
@@ -91,7 +91,7 @@ class NegaBase(nb.NegaBase):
             iterations (int): Maximum number of optimization iterations.
             symmetry_parameter (float): Parameter for adjusting gradient symmetry during
                 optimization.
-            smoothness_parameter (float): Initial smoothness parameter for optimization steps.
+            lipschitz_smoothness (float): Initial smoothness parameter for optimization steps.
             rho_increase (float): Multiplicative factor to dynamically increase the optimization
                 step size.
             rho_decrease (float): Multiplicative factor to dynamically decrease the optimization
@@ -105,7 +105,9 @@ class NegaBase(nb.NegaBase):
                 if performance does not improve.
         """
         if flip_labels is not None:
-            raise NotImplementedError("Flip Label is not implemented for sparse matrices.")
+            raise NotImplementedError(
+                "Flip Label is not implemented for sparse matrices."
+            )
 
         self.matrix = matrix
         self.train_mask = train_mask
@@ -116,20 +118,24 @@ class NegaBase(nb.NegaBase):
         self.test_i, self.test_j = self.test_mask.nonzero()
 
         self.train_y = np.asarray(self.matrix[self.train_i, self.train_j]).ravel()
-        self.test_y = np.asarray(self.matrix[self.test_i,  self.test_j]).ravel()
+        self.test_y = np.asarray(self.matrix[self.test_i, self.test_j]).ravel()
 
         self.rank = rank
         self.regularization_parameters = regularization_parameters
         self.iterations = iterations
         self.symmetry_parameter = symmetry_parameter
-        self.smoothness_parameter = smoothness_parameter
+        self.lipschitz_smoothness = lipschitz_smoothness
         self.rho_increase = rho_increase
         self.rho_decrease = rho_decrease
         self.h1 = None
         self.h2 = None
         self.early_stopping = early_stopping
         self.loss_terms = {}
-        self.tau = tau
+        if tau is not None:
+            self.tau = tau
+        else:
+            vals = self.matrix[self.train_i, self.train_j]
+            self.tau = np.linalg.norm(vals) / 3
         # Set random seed for reproducibility
         np.random.seed(seed)
 
@@ -147,18 +153,6 @@ class NegaBase(nb.NegaBase):
             np.ndarray: The prediction ij.
         """
 
-    def init_tau(self) -> float:
-        """
-        Initialize tau value.
-
-        Returns:
-            float: tau value.
-        """
-        if self.tau is not None:
-            return self.tau
-        vals = self.matrix[self.train_i, self.train_j]
-        return np.linalg.norm(vals) / 3
-
     def calculate_training_residual_entries(self) -> np.ndarray:
         """
         Compute the training residual from the input matrix M (m x n), the model's prediction
@@ -172,7 +166,7 @@ class NegaBase(nb.NegaBase):
             np.ndarray: The residual matrix R, shape: (nnz_train,).
         """
         yhat = self.predict_entries(self.train_i, self.train_j)
-        return (yhat - self.train_y)  
+        return yhat - self.train_y
 
     def calculate_rmse(self, mask: sp.csr_matrix) -> float:
         """
